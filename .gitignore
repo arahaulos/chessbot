@@ -1,0 +1,10 @@
+bin/
+obj/
+builds/
+tuning/
+*.o
+*.bat
+*.exe
+*.cbp
+*.depend
+*.layout
