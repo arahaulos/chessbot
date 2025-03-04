@@ -1,7 +1,9 @@
 ##UCI chess engine
+
 Estimated strength 3400 Elo (Blitz)
 
 #efficiently updatable neural network (NNUE) evaluation:
+
 	-16 king buckets (total 2x16x768 inputs)
 	-256x2 -> 32 -> 1 architecture
 	-clipped relu activation function
@@ -11,6 +13,7 @@ Estimated strength 3400 Elo (Blitz)
 	-CPU trainer (backpropagation + ADAM optimizer)
 
 #principal variation search
+
 -iterative deepening
 -aspiration window
 -transposition table
@@ -21,6 +24,7 @@ Estimated strength 3400 Elo (Blitz)
 -improving heurestic
 
 -pruning
+
 	-null move pruning
 	-reverse futility pruning
 	-late move pruning
@@ -31,11 +35,13 @@ Estimated strength 3400 Elo (Blitz)
 	-mate distance pruning
 
 -reductions
+
 	-late move reduction
 	-history based reductions
 	-internal iterative reductions
 
 -move ordering
+
 	-hash move
 	-static exchange evaluation (SEE)
 	-history heurestic
@@ -49,11 +55,13 @@ Estimated strength 3400 Elo (Blitz)
 -singular extension
 
 #quiscence search
+
 -TT probing
 -SEE move ordering
 -SEE pruning	
 
 #requirements
+
 x86-64 cpu with AVX2 and BMI2 extensions (Intel Haswell or newer. AMD Excavator or newer)
 
 	
