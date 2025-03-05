@@ -30,12 +30,10 @@ inline int32_t pop_count(uint64_t u64) {
 
 
 struct bitboard_utility {
-
-    int sliding_vectors_table[8*2];
-    int distance_to_edge_table[64][8];
-
     uint32_t bishop_lookup_offset[64];
     uint32_t rook_lookup_offset[64];
+
+    int distance_to_edge_table[64][8];
 
     bitboard bishop_pattern0[64];
     bitboard rook_pattern0[64];
@@ -61,7 +59,6 @@ struct bitboard_utility {
 
     bitboard center_board_mask;
     bitboard extended_center_board_mask;
-    int distance_to_center[64];
 
     bitboard_utility();
 
@@ -170,8 +167,6 @@ private:
 };
 
 extern bitboard_utility bitboard_utils;
-
-
 
 void print_bitboard(bitboard bb);
 

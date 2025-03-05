@@ -70,7 +70,7 @@ struct nnue_perspective
     nnue_perspective(nnue_perspective_weights<INPUTS, NEURONS> *w) {
         weights = w;
         neurons_buffer = new int16_t[NEURONS+64];
-        acculumator_buffer = new int16_t[NEURONS*128+64];
+        acculumator_buffer = new int16_t[NEURONS*130+64];
 
         neurons = align_ptr(neurons_buffer);
         acculumator = align_ptr(acculumator_buffer);
@@ -81,6 +81,21 @@ struct nnue_perspective
     ~nnue_perspective() {
         delete [] neurons_buffer;
         delete [] acculumator_buffer;
+    }
+
+    void copy_acculumator(int16_t *destination)
+    {
+        for (int i = 0; i < NEURONS; i += 32) {
+            _mm256_store_si256((__m256i*)&destination[i], _mm256_load_si256((__m256i*)&acculumator[i]));
+            _mm256_store_si256((__m256i*)&destination[i+16], _mm256_load_si256((__m256i*)&acculumator[i+16]));
+        }
+    }
+
+    void reset_stack()
+    {
+        int16_t *new_acculumator = align_ptr(acculumator_buffer);
+        copy_acculumator(new_acculumator);
+        acculumator = new_acculumator;
     }
 
 
@@ -168,10 +183,7 @@ struct nnue_perspective
 
     void push_acculumator() {
         int16_t *new_acculumator = &acculumator[NEURONS];
-        for (int i = 0; i < NEURONS; i += 32) {
-            _mm256_store_si256((__m256i*)&new_acculumator[i], _mm256_load_si256((__m256i*)&acculumator[i]));
-            _mm256_store_si256((__m256i*)&new_acculumator[i+16], _mm256_load_si256((__m256i*)&acculumator[i+16]));
-        }
+        copy_acculumator(new_acculumator);
         acculumator = new_acculumator;
     }
 

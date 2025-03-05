@@ -226,6 +226,8 @@ struct search_context
         state = state_to_search;
         if (nnue) {
             state.nnue = nnue;
+
+            nnue->reset_acculumator_stack();
             nnue->evaluate(state);
         } else {
             state.nnue = nullptr;
@@ -274,8 +276,6 @@ public:
         shared_nnue_weights->rescale_factor1 = f1;
     }
 
-    void run_perft(board_state &state, int depth, bool validation);
-
     uint64_t get_search_time_ms();
 
 
@@ -288,7 +288,6 @@ public:
     int get_multi_pv() {
         return num_of_pvs;
     }
-
 
     void clear_transposition_table();
     void clear_evaluation_cache();
@@ -341,6 +340,16 @@ public:
 private:
     int32_t static_evaluation(const board_state &state, player_type_t player, search_statistics &stats);
 
+    void iterative_search(int max_depth);
+    void start_helper_threads(int32_t window_alpha, int32_t window_beta, int depth);
+    void stop_helper_threads();
+    void aspirated_search(int depth);
+    void search_root(int32_t window_alpha, int32_t window_beta, int depth, int thread_id);
+
+    int32_t alphabeta(board_state &state, int32_t alpha, int32_t beta, int depth, int ply, search_context &sc, pv_table &pv, chess_move *skip_move, node_type_t expected_node_type);
+    int32_t quisearch(board_state &state, int32_t alpha, int32_t beta, int ply, search_statistics &stats, bool is_pv);
+
+
     int number_of_helper_threads;
     int nominal_search_depth;
 
@@ -353,51 +362,32 @@ private:
 
     cache<tt_entry, TT_SIZE> move_cache;
     cache<eval_table_entry, EVAL_CACHE_SIZE> eval_cache;
-    cache<tt_entry, 1> test_perft_tt;
 
     opening_book book;
     board_state state_to_search;
 
 
-    uint64_t perft(board_state &state, int depth);
-    uint64_t debug_perft(board_state &state, int depth, int ply, search_context &sc, int32_t &eval_sum);
-
-
-    void iterative_search(int max_depth);
-    void start_helper_threads(int32_t window_alpha, int32_t window_beta, int depth);
-    void stop_helper_threads();
-    void aspirated_search(int depth);
-    void search_root(int32_t window_alpha, int32_t window_beta, int depth, int thread_id);
-
-    int32_t alphabeta(board_state &state, int32_t alpha, int32_t beta, int depth, int ply, search_context &sc, pv_table &pv, chess_move *skip_move, node_type_t expected_node_type);
-    int32_t quisearch(board_state &state, int32_t alpha, int32_t beta, int ply, search_statistics &stats, bool is_pv);
-
     std::thread search_main_thread;
     std::vector<std::thread> helper_threads;
     std::vector<std::unique_ptr<search_context>> thread_datas;
 
-
-    pv_table root_search_pv[MAX_MULTI_PV];
-    std::mutex root_search_lock;
-
-    int num_of_pvs;
-
-    std::mutex best_move_lock;
-
     int best_move_depth;
     pv_table best_pv[MAX_MULTI_PV];
-
-    search_statistics all_threads_stats;
+    pv_table root_search_pv[MAX_MULTI_PV];
+    std::mutex root_search_lock;
+    std::mutex best_move_lock;
 
     std::atomic<bool> searching_flag;
     std::atomic<bool> alphabeta_abort_flag;
     std::atomic<bool> ready_flag;
 
+    int num_of_pvs;
+
+    search_statistics all_threads_stats;
+
     std::vector<std::pair<chess_move, int32_t>> root_moves;
 
-
     std::shared_ptr<nnue_weights> shared_nnue_weights;
-
 
     int limit_nodes;
     int min_depth;

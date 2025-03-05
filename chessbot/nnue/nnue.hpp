@@ -59,6 +59,12 @@ struct nnue_network
         white_side.reset();
     }
 
+    void reset_acculumator_stack()
+    {
+        white_side.reset_stack();
+        black_side.reset_stack();
+    }
+
     void push_acculumator()
     {
         black_side.push_acculumator();

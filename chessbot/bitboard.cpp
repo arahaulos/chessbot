@@ -4,12 +4,28 @@
 #include <math.h>
 
 
+int sliding_vectors_table[8*2] =
+{
+    1, 1, 1, -1, -1, 1, -1, -1, 1, 0, -1, 0, 0, 1, 0, -1
+};
+
+int distance_to_center[64] =
+{
+    4, 4, 4, 4, 4, 4, 4, 4,
+    4, 3, 3, 3, 3, 3, 3, 4,
+    4, 3, 2, 2, 2, 2, 3, 4,
+    4, 3, 2, 1, 1, 2, 3, 4,
+    4, 3, 2, 1, 1, 2, 3, 4,
+    4, 3, 2, 2, 2, 2, 3, 4,
+    4, 3, 3, 3, 3, 3, 3, 4,
+    4, 4, 4, 4, 4, 4, 4, 4
+};
+
+
 bitboard_utility bitboard_utils;
 
 void bitboard_utility::generate_sliding_tables()
 {
-    std::cout << "Generating sliding tables" << std::endl;
-
     for (int v = 0; v < 8; v++) {
         int vx = sliding_vectors_table[v*2+0];
         int vy = sliding_vectors_table[v*2+1];
@@ -17,10 +33,6 @@ void bitboard_utility::generate_sliding_tables()
         for (int i = 0; i < BOARD_WIDTH*BOARD_HEIGHT; i++) {
             int x = i % BOARD_WIDTH;
             int y = i / BOARD_WIDTH;
-
-            if (y*BOARD_WIDTH + x != i) {
-                std::cout << "perkele" << std::endl;
-            }
 
             int c = 0;
 
@@ -114,8 +126,6 @@ bitboard bitboard_utility::get_sliding_xray_pattern(int sq_index, bitboard occ, 
 
 void bitboard_utility::init_bishop_lookup()
 {
-    std::cout << "Generating bishop lookup table" << std::endl;
-
     uint32_t lookup_offset = 0;
 
     for (int i = 0; i < 64; i++) {
@@ -136,11 +146,9 @@ void bitboard_utility::init_bishop_lookup()
 
         lookup_offset += lookups;
     }
-    std::cout << "Size: " << lookup_offset*sizeof(uint64_t) / 1024 << "kB" << std::endl;
 }
 
 void bitboard_utility::init_rook_lookup() {
-    std::cout << "Generating rook lookup table" << std::endl;
 
     uint32_t lookup_offset = 0;
 
@@ -162,15 +170,10 @@ void bitboard_utility::init_rook_lookup() {
 
         lookup_offset += lookups;
     }
-
-    std::cout << "Size: " << lookup_offset*sizeof(uint64_t) / 1024 << "kB" << std::endl;
 }
 
 void bitboard_utility::init_pawn_tables(bool black)
 {
-    std::cout << "Generating " << (black ? "BLACK" : "WHITE") << " pawn tables" << std::endl;
-
-
     for (int i = 0; i < 64; i++) {
         int posx = i % 8;
         int posy = i / 8;
@@ -250,8 +253,6 @@ void bitboard_utility::init_pawn_tables(bool black)
 
 void bitboard_utility::init_knight_tables()
 {
-    std::cout << "Generating knight tables" << std::endl;
-
     static const int8_t pattern[16] = {
         2,  1,
         2, -1,
@@ -284,9 +285,6 @@ void bitboard_utility::init_knight_tables()
 
 void bitboard_utility::init_king_tables()
 {
-
-    std::cout << "Generating king tables" << std::endl;
-
     static const int pattern[16] = {
         1,   0,
         -1,   0,
@@ -320,7 +318,6 @@ void bitboard_utility::init_king_tables()
 
 void bitboard_utility::init_file_rank_lookups()
 {
-    std::cout << "Generating file rank masks" << std::endl;
     for (int i = 0; i < 8; i++) {
         bitboard f = 0;
         bitboard r = 0;
@@ -349,7 +346,6 @@ void bitboard_utility::init_file_rank_lookups()
 
 void bitboard_utility::init_passed_pawn_lookups()
 {
-    std::cout << "Generating passed pawn masks" << std::endl;
     for (int i = 0; i < 64; i++) {
         int sx = i % 8;
         int sy = i / 8;
@@ -380,8 +376,6 @@ void bitboard_utility::init_passed_pawn_lookups()
 
 void bitboard_utility::init_board_area_masks()
 {
-    std::cout << "Generating board area masks" << std::endl;
-
     center_board_mask = 0;
     extended_center_board_mask = 0;
 
@@ -403,28 +397,6 @@ void bitboard_utility::init_board_area_masks()
 
 
 bitboard_utility::bitboard_utility() {
-    std::cout << "Initializing bitboard lookup tables" << std::endl;
-
-    int svt[8*2] = {1, 1, 1, -1, -1, 1, -1, -1, 1, 0, -1, 0, 0, 1, 0, -1};
-    int dtc[64] = {
-    4, 4, 4, 4, 4, 4, 4, 4,
-    4, 3, 3, 3, 3, 3, 3, 4,
-    4, 3, 2, 2, 2, 2, 3, 4,
-    4, 3, 2, 1, 1, 2, 3, 4,
-    4, 3, 2, 1, 1, 2, 3, 4,
-    4, 3, 2, 2, 2, 2, 3, 4,
-    4, 3, 3, 3, 3, 3, 3, 4,
-    4, 4, 4, 4, 4, 4, 4, 4
-    };
-
-    for (int i = 0; i < 64; i++) {
-        distance_to_center[i] = dtc[i];
-    }
-    for (int i = 0; i < 16; i++) {
-        sliding_vectors_table[i] = svt[i];
-    }
-
-
     generate_sliding_tables();
 
     init_pawn_tables(false);
@@ -436,8 +408,6 @@ bitboard_utility::bitboard_utility() {
     init_file_rank_lookups();
     init_passed_pawn_lookups();
     init_board_area_masks();
-
-    std::cout << "PEXT movegen ready to use!" << std::endl;
 }
 
 void print_bitboard(bitboard bb)

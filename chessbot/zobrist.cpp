@@ -16,8 +16,6 @@ uint64_t zobrist::rand_bitstring()
 
 zobrist::zobrist()
 {
-    std::cout << "Initializing zobrist hash lookups" << std::endl;
-
     rand = seed;
     for (int i = 0; i < 20; i++) {
         rand_bitstring();
