@@ -39,6 +39,14 @@ public:
         return h;
     }
 
+    uint64_t get_singular_search_hash(uint64_t h, chess_move m)
+    {
+        h ^= singular_search_hashing_from[m.from.index];
+        h ^= singular_search_hashing_to[m.to.index];
+        h ^= singular_search_promotion[m.promotion];
+        return h;
+    }
+
     uint64_t update_hash(uint64_t prev_hash, const board_state &state, chess_move m) {
         uint64_t h = (prev_hash ^ turn_xor);
 
@@ -140,6 +148,10 @@ private:
 
     uint64_t rand;
     uint64_t rand_bitstring();
+
+    uint64_t singular_search_hashing_from[64];
+    uint64_t singular_search_hashing_to[64];
+    uint64_t singular_search_promotion[8];
 };
 
 extern zobrist hashgen;

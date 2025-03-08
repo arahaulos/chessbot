@@ -87,10 +87,6 @@ struct scored_move_array
         num_of_moves++;
         moves_left++;
     }
-    void reset()
-    {
-        moves_left = num_of_moves;
-    }
 
     scored_move moves[N];
     int num_of_moves;
@@ -139,31 +135,9 @@ struct move_picker
         promotions.clear();
     }
 
-    int32_t get_quiet_score(board_state &state, int ply, chess_move mov) {
-        return history_table->get_quiet_history(state, ply, mov);
-    }
-
     void skip_quiets()
     {
         skip_quiets_flag = true;
-    }
-
-    void reset()
-    {
-        stage = TT_MOVE;
-        tt_move_picked = false;
-        skip_quiets_flag = false;
-
-        picked_quiet_count = 0;
-        picked_capture_count = 0;
-        legal_moves = 0;
-
-        winning_captures.reset();
-        losing_captures.reset();
-        killers.reset();
-        good_non_killers.reset();
-        bad_non_killers.reset();
-        promotions.reset();
     }
 
     int32_t get_threats_score(chess_move mov)
@@ -260,7 +234,7 @@ struct move_picker
             }
 
             int32_t see = static_exchange_evaluation(*state, m);
-            int32_t score = see + (history_table->get_capture_history(*state, m) / 32);
+            int32_t score = see + (history_table->get_capture_history(m) / 32);
 
             if (score >= 0 && !winning_captures.is_full()) {
                 winning_captures.add(m, score);
@@ -277,7 +251,7 @@ struct move_picker
             if (m == tt_move) {
                 continue;
             }
-            int32_t score = get_quiet_score(*state, ply, m) + get_threats_score(m);
+            int32_t score = history_table->get_quiet_history(ply, m) + get_threats_score(m);
 
             killers.add(m, score);
         }
@@ -289,7 +263,7 @@ struct move_picker
             if (m == tt_move || killers.contains(m)) {
                 continue;
             }
-            int32_t score = get_quiet_score(*state, ply, moves[i]) + get_threats_score(m);
+            int32_t score = history_table->get_quiet_history(ply, m) + get_threats_score(m);
 
             if (score > 3000 && !good_non_killers.is_full()) {
                 good_non_killers.add(m, score);
@@ -305,7 +279,7 @@ struct move_picker
             if (m == tt_move) {
                 continue;
             }
-            int32_t score = get_quiet_score(*state, ply, moves[i]);
+            int32_t score = history_table->get_quiet_history(ply, m);
 
             promotions.add(m, score);
         }
@@ -315,10 +289,10 @@ struct move_picker
 
     void previus_pick_was_skipped(const chess_move &skipped_move)
     {
-        if (picked_quiet_count > 0 && skipped_move == picked_quiet_moves[picked_quiet_count-1]) {
-            picked_quiet_count--;
-        } else if (picked_capture_count > 0 && skipped_move == picked_captures[picked_capture_count-1]) {
+        if (skipped_move.is_capture()) {
             picked_capture_count--;
+        } else {
+            picked_quiet_count--;
         }
     }
 
@@ -412,7 +386,7 @@ struct move_picker
                 return type;
             }
             if (!state->causes_check(m, state->get_turn())) {
-                if (state->get_square(m.to).get_type() != EMPTY) {
+                if (m.is_capture()) {
                     picked_captures[picked_capture_count] = m;
                     picked_capture_count++;
                 } else {

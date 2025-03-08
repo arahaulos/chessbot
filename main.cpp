@@ -15,12 +15,15 @@ int main()
 
     //training_data_utility::convert_training_data({"tuning\\selfplays_nnue8"}, "tuning\\data3", 1024);
 
-    //nnue_trainer::train("netkb16_2_6.nnue", "qnetkb16_2_6.nnue", {"tuning\\data_d8", "tuning\\data2", "tuning\\data3"});
+    //nnue_trainer::train("netkb16_2_7.nnue", "qnetkb16_2_7.nnue", {"tuning\\data_d8", "tuning\\data2", "tuning\\data3"});
 
     //tuning_utility::tune_search_params(1000, 50, 16, 60000, {"rfmargin_base", "rfmargin_mult", "rfmargin_improving_modifier", "fmargin_base", "fmargin_mult", "hmargin_mult"});
 
     /*std::unique_ptr<alphabeta_search> bot0 = std::make_unique<alphabeta_search>();
     std::unique_ptr<alphabeta_search> bot1 = std::make_unique<alphabeta_search>();
+
+    //bot0->load_nnue_net("qnetkb16_2_7.nnue");
+    //bot1->load_nnue_net("embedded_weights.nnue");
 
     bot0->set_threads(1);
     bot1->set_threads(1);
@@ -29,8 +32,10 @@ int main()
     bot0->experimental_features = true;
     bot1->experimental_features = false;
 
-    //tuning_utility::test(20000, 1000, 50, *bot0, *bot1, 16, "", 0.0f, 5.0f);
-    tuning_utility::test(20000, 16000, 1000, *bot0, *bot1, 16, "builds/4_3_25/chessbot_x64.exe", 0.0f, 5.0f);
+    //tuning_utility::test(20000, 1000, 100, *bot0, *bot1, 16, "", 0.0f, 5.0f);
+    //tuning_utility::test(20000, 16000, 1000, *bot0, *bot1, 16, "builds/4_3_25/chessbot_x64.exe", 0.0f, 5.0f);
+    tuning_utility::test(20000, 16000, 1000, *bot0, *bot1, 16, "C:/Users/Ara/Documents/stockfish/Koivisto_6.0-x64-windows-avx2.exe", 0.0f, 5.0f);
+    //tuning_utility::test(20000, 16000, 1000, *bot0, *bot1, 16, "C:/Users/Ara/Documents/stockfish/patricia_4_v3.exe", 0.0f, 5.0f);
     //*/
 
     std::unique_ptr<application> app = std::make_unique<application>();

@@ -4,18 +4,30 @@
 
 struct move_generator
 {
-    static chess_move *serialize_moves(chess_move &m, bitboard moves, chess_move *buffer)
+    static chess_move *serialize_moves(chess_move &m, const board_state &state, bitboard moves, chess_move *buffer)
     {
         while (moves) {
             uint_fast8_t target_index = bit_scan_forward (moves);
             moves &= moves-1;
 
-            m.to.index = target_index;
-
             *buffer = m;
+            buffer->to.index = target_index;
+            buffer->extra_info |= chess_move::encode_captured_piece_info(state.get_square(target_index));
             buffer++;
         }
         return buffer;
+    }
+
+    static uint8_t encode_move_extra_info(const board_state &state, chess_move mov)
+    {
+        piece moving_piece = state.get_square(mov.from);
+        piece captured_piece = state.get_square(mov.to);
+
+        if (moving_piece.get_type() == PAWN && mov.to == state.en_passant_square && (state.flags & EN_PASSANT_AVAILABLE) != 0) {
+            captured_piece = piece(next_turn(moving_piece.get_player()), PAWN);
+        }
+
+        return chess_move::encode_captured_piece_info(captured_piece) | chess_move::encode_moving_piece_info(moving_piece);
     }
 
 
@@ -48,6 +60,7 @@ struct move_generator
     {
         chess_move m;
         m.promotion = EMPTY;
+        m.extra_info = chess_move::encode_moving_piece_info(piece((color ? BLACK : WHITE), PAWN));
 
         bitboard iterate_pieces = state.bitboards[PAWN][color];
         while (iterate_pieces) {
@@ -66,13 +79,19 @@ struct move_generator
 
                 if (m.to.get_y() == 0 || m.to.get_y() == 7) {
                     for (int i = QUEEN; i >= KNIGHT; i--) {
-                        m.promotion = static_cast<piece_type_t>(i);
                         *buffer = m;
+                        buffer->extra_info |= chess_move::encode_captured_piece_info(state.get_square(target_index));
+                        buffer->promotion = static_cast<piece_type_t>(i);
                         buffer++;
                     }
-                    m.promotion = EMPTY;
                 } else {
                     *buffer = m;
+                    buffer->extra_info |= chess_move::encode_captured_piece_info(state.get_square(target_index));
+
+                    if (target_index == state.en_passant_square.get_index() && (state.flags & EN_PASSANT_AVAILABLE) != 0) {
+                        buffer->extra_info |= chess_move::encode_captured_piece_info(piece((color ? WHITE : BLACK), PAWN));
+                    }
+
                     buffer++;
                 }
             }
@@ -84,6 +103,7 @@ struct move_generator
     {
         chess_move m;
         m.promotion = EMPTY;
+        m.extra_info = chess_move::encode_moving_piece_info(piece((color ? BLACK : WHITE), PAWN));
 
         bitboard iterate_pieces = state.bitboards[PAWN][color];
         while (iterate_pieces) {
@@ -121,6 +141,7 @@ struct move_generator
     {
         chess_move m;
         m.promotion = EMPTY;
+        m.extra_info = chess_move::encode_moving_piece_info(piece((color ? BLACK : WHITE), KNIGHT));
 
         bitboard iterate_pieces = state.bitboards[KNIGHT][color];
         while (iterate_pieces) {
@@ -131,7 +152,7 @@ struct move_generator
 
             m.from.index = index;
 
-            buffer = serialize_moves(m, moves, buffer);
+            buffer = serialize_moves(m, state, moves, buffer);
         }
 
         return buffer;
@@ -141,6 +162,7 @@ struct move_generator
     {
         chess_move m;
         m.promotion = EMPTY;
+        m.extra_info = chess_move::encode_moving_piece_info(piece((color ? BLACK : WHITE), BISHOP));
 
         bitboard iterate_pieces = state.bitboards[BISHOP][color];
         while (iterate_pieces) {
@@ -151,7 +173,7 @@ struct move_generator
 
             m.from.index = index;
 
-            buffer = serialize_moves(m, moves, buffer);
+            buffer = serialize_moves(m, state, moves, buffer);
         }
 
         return buffer;
@@ -161,6 +183,7 @@ struct move_generator
     {
         chess_move m;
         m.promotion = EMPTY;
+        m.extra_info = chess_move::encode_moving_piece_info(piece((color ? BLACK : WHITE), ROOK));
 
         bitboard iterate_pieces = state.bitboards[ROOK][color];
         while (iterate_pieces) {
@@ -171,7 +194,7 @@ struct move_generator
 
             m.from.index = index;
 
-            buffer = serialize_moves(m, moves, buffer);
+            buffer = serialize_moves(m, state, moves, buffer);
         }
 
         return buffer;
@@ -181,6 +204,7 @@ struct move_generator
     {
         chess_move m;
         m.promotion = EMPTY;
+        m.extra_info = chess_move::encode_moving_piece_info(piece((color ? BLACK : WHITE), QUEEN));
 
         bitboard iterate_pieces = state.bitboards[QUEEN][color];
         while (iterate_pieces) {
@@ -191,7 +215,7 @@ struct move_generator
 
             m.from.index = index;
 
-            buffer = serialize_moves(m, moves, buffer);
+            buffer = serialize_moves(m, state, moves, buffer);
         }
 
         return buffer;
@@ -201,6 +225,7 @@ struct move_generator
     {
         chess_move m;
         m.promotion = EMPTY;
+        m.extra_info = chess_move::encode_moving_piece_info(piece((color ? BLACK : WHITE), KING));
 
         bitboard iterate_pieces = state.bitboards[KING][color];
         while (iterate_pieces) {
@@ -211,7 +236,7 @@ struct move_generator
 
             m.from.index = index;
 
-            buffer = serialize_moves(m, moves, buffer);
+            buffer = serialize_moves(m, state, moves, buffer);
         }
 
 
@@ -355,7 +380,7 @@ struct move_generator
 
     static int generate_killer_moves(const board_state &state, history_heurestic_table &history_table, int ply, chess_move *movelist)
     {
-        int c = history_table.get_killers(state, movelist, ply);
+        int c = history_table.get_killers(movelist, ply);
         for (int i = 0; i < c; i++) {
             bool dublicate = false;
             for (int j = 0; j < i; j++) {
@@ -375,6 +400,7 @@ struct move_generator
             bool is_capture = state.get_square(movelist[i].to).get_type() != EMPTY;
 
             movelist[i].promotion = EMPTY;
+            movelist[i].extra_info = chess_move::encode_moving_piece_info(state.get_square(movelist[i].from));
 
             if (!is_move_valid(state, movelist[i]) || is_en_passant || is_promotion || is_capture) {
                 std::swap(movelist[i], movelist[c-1]);

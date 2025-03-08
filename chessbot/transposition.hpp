@@ -3,6 +3,9 @@
 #define TT_SLOT_DEPTH_PREFERRED 0
 #define TT_SLOT_ALWAYS_REPLACE 1
 
+#include "state.hpp"
+#include "movegen.hpp"
+
 
 constexpr int32_t TT_MAX_EVAL = std::numeric_limits<int16_t>::max() - 512;
 constexpr int32_t TT_MIN_EVAL = -TT_MAX_EVAL;
@@ -135,7 +138,7 @@ struct tt_entry_slot
         key = zhash ^ data;
     }
 
-    inline void decode(chess_move &bm, int &d, int &t, int32_t &e, int32_t &se, int ply) const
+    inline void decode(const board_state &state, chess_move &bm, int &d, int &t, int32_t &e, int32_t &se, int ply) const
     {
         bm.from = (best_move >> 10) & 0x3F;
         bm.to = (best_move >> 4) & 0x3F;
@@ -147,6 +150,8 @@ struct tt_entry_slot
         se = (static_eval_type >> 2);
 
         e = score_from_tt(e, ply);
+
+        bm.extra_info = move_generator::encode_move_extra_info(state, bm);
     }
 };
 
@@ -167,7 +172,7 @@ struct tt_entry
         return 2 - slot0_free - slot1_free;
     }
 
-    bool read(const uint64_t &zhash, chess_move &bm, int &d, int &t, int32_t &e, int32_t &se, int ply) const {
+    bool read(const board_state &state, const uint64_t &zhash, chess_move &bm, int &d, int &t, int32_t &e, int32_t &se, int ply) const {
         tt_entry_slot entry0;
         tt_entry_slot entry1;
 
@@ -176,12 +181,12 @@ struct tt_entry
 
         if (entry0.is_valid(zhash)) {
 
-            entry0.decode(bm, d, t, e, se, ply);
+            entry0.decode(state, bm, d, t, e, se, ply);
 
             return true;
         } else if (entry1.is_valid(zhash)) {
 
-            entry1.decode(bm, d, t, e, se, ply);
+            entry1.decode(state, bm, d, t, e, se, ply);
 
             return true;
         }

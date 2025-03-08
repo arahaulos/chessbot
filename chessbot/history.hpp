@@ -7,12 +7,18 @@ constexpr int32_t correction_clamp = 100;
 
 struct piece_square_history
 {
-    int16_t history[2][8][64];
-    int16_t *get(const board_state &state, chess_move &mov)
+    int16_t history[16][64];
+    int32_t get(chess_move &mov)
     {
-        int player_index = (state.get_turn() == WHITE ? 0 : 1);
+        return history[mov.get_moving_piece().d][mov.to.index];
+    }
 
-        return &history[player_index][state.get_square(mov.from).get_type()][mov.to.index];
+    void update(chess_move &mov, int32_t bonus)
+    {
+        int32_t old_value = history[mov.get_moving_piece().d][mov.to.index];
+        int32_t new_value = old_value + bonus - (old_value * std::abs(bonus) / 16384);
+
+        history[mov.get_moving_piece().d][mov.to.index] = std::clamp(new_value, -32000, 32000);
     }
 };
 
@@ -28,51 +34,39 @@ struct history_heurestic_table
         memset((void*)this, 0, sizeof(*this));
     }
 
-    void adjust_score(int16_t *table, int32_t bonus)
-    {
-        int32_t old_value = *table;
-        int32_t new_value = old_value + bonus - (old_value * std::abs(bonus) / 16384);
-
-        *table = std::clamp(new_value, -32000, 32000);
-
-        //(*table) += bonus - ((*table) * std::abs(bonus) / 16384);
-    }
-
-
-    void update_continuation_history(const board_state &state, chess_move m, int ply, int effect)
+    void update_continuation_history(chess_move m, int ply, int effect)
     {
         if (ply >= 1 && conthist_stack[ply-1] != nullptr) {
-            adjust_score(conthist_stack[ply-1]->get(state, m), effect);
+            conthist_stack[ply-1]->update(m, effect);
         }
         if (ply >= 2 && conthist_stack[ply-2] != nullptr) {
-            adjust_score(conthist_stack[ply-2]->get(state, m), effect);
+            conthist_stack[ply-2]->update(m, effect);
         }
         if (ply >= 4 && conthist_stack[ply-4] != nullptr) {
-            adjust_score(conthist_stack[ply-4]->get(state, m), effect);
+            conthist_stack[ply-4]->update(m, effect);
         }
         if (ply >= 6 && conthist_stack[ply-6] != nullptr) {
-            adjust_score(conthist_stack[ply-6]->get(state, m), effect);
+            conthist_stack[ply-6]->update(m, effect);
         }
     }
 
-    int32_t get_continuation_history(const board_state &state, chess_move m, int ply)
+    int32_t get_continuation_history(chess_move m, int ply)
     {
         int score = 0;
         if (ply >= 1 && conthist_stack[ply-1] != nullptr) {
-            score += *(conthist_stack[ply-1]->get(state, m));
+            score += conthist_stack[ply-1]->get(m);
         }
         if (ply >= 2 && conthist_stack[ply-2] != nullptr) {
-            score += *(conthist_stack[ply-2]->get(state, m));
+            score += conthist_stack[ply-2]->get(m);
         }
         if (ply >= 4 && conthist_stack[ply-4] != nullptr) {
-            score += *(conthist_stack[ply-4]->get(state, m));
+            score += conthist_stack[ply-4]->get(m);
         }
         return score;
     }
 
-    void update(const board_state &state, chess_move bm, int depth, int ply, chess_move *searched_quiets, int searched_quiet_count, chess_move *searched_captures, int searched_capture_count) {
-        int player_index = (state.get_turn() == WHITE ? 0 : 1);
-        bool is_capture = (state.get_square(bm.to).get_type() != EMPTY);
+    void update(chess_move bm, int depth, int ply, chess_move *searched_quiets, int searched_quiet_count, chess_move *searched_captures, int searched_capture_count) {
+        bool is_capture = bm.is_capture();
 
         if (!is_capture) {
             int b = KILLER_MOVE_SLOTS-1;
@@ -88,21 +82,21 @@ struct history_heurestic_table
             killer_moves[ply][0] = bm;
         }
 
+
         if (depth < 4) {
             return;
         }
 
         int32_t bonus = std::min(32 * depth * depth, 8192);
 
-
         if (is_capture) {
             if (searched_capture_count > 1) {
-                adjust_score(capture_history[state.get_square(bm.to).get_type()].get(state, bm), bonus*(searched_capture_count-1));
+                capture_history[bm.get_captured_piece().get_type()].update(bm, bonus*(searched_capture_count-1));
 
                 for (int i = 0; i < searched_capture_count; i++) {
                     chess_move cap = searched_captures[i];
                     if (cap != bm) {
-                        adjust_score(capture_history[state.get_square(cap.to).get_type()].get(state, cap), -bonus);
+                        capture_history[cap.get_captured_piece().get_type()].update(cap, -bonus);
                     }
                 }
             }
@@ -110,15 +104,15 @@ struct history_heurestic_table
             if (searched_quiet_count > 1) {
                 int increase = bonus*(searched_quiet_count-1);
 
-                adjust_score(history.get(state, bm), increase);
-                update_continuation_history(state, bm, ply, increase);
+                history.update(bm, increase);
+                update_continuation_history(bm, ply, increase);
 
                 for (int i = 0; i < searched_quiet_count; i++) {
                     chess_move m = searched_quiets[i];
 
                     if (m != bm) {
-                        adjust_score(history.get(state, m), -bonus);
-                        update_continuation_history(state, m, ply, -bonus);
+                        history.update(m, -bonus);
+                        update_continuation_history(m, ply, -bonus);
                     }
                 }
             }
@@ -127,32 +121,29 @@ struct history_heurestic_table
                 chess_move previous_move = move_stack[ply-1];
 
                 if (previous_move != chess_move::null_move()) {
-                    counter_moves[player_index][state.get_square(previous_move.to).get_type()][previous_move.to.index] = bm;
+                    counter_moves[previous_move.get_moving_piece().d][previous_move.to.index] = bm;
                 }
             }
         }
     }
 
 
-    int32_t get_capture_history(const board_state &state, chess_move cap)
+    int32_t get_capture_history(chess_move cap)
     {
-        return *capture_history[state.get_square(cap.to).get_type()].get(state, cap);
+        return capture_history[cap.get_captured_piece().get_type()].get(cap);
     }
 
-    int32_t get_quiet_history(const board_state &state, int ply, chess_move m) {
-        return get_continuation_history(state, m, ply) +
-               *history.get(state, m);
+    int32_t get_quiet_history(int ply, chess_move m) {
+        return get_continuation_history(m, ply) + history.get(m);
     }
 
-    int get_killers(const board_state &state, chess_move *buffer, int ply)
+    int get_killers(chess_move *buffer, int ply)
     {
-        int player_index = (state.get_turn() == WHITE ? 0 : 1);
-
         chess_move previous_move = move_stack[ply-1];
 
         int index = 0;
 
-        buffer[index++] = counter_moves[player_index][state.get_square(previous_move.to).get_type()][previous_move.to.index];
+        buffer[index++] = counter_moves[previous_move.get_moving_piece().d][previous_move.to.index];
 
         for (int i = 0; i < KILLER_MOVE_SLOTS; i++) {
             buffer[index++] = killer_moves[ply][i];
@@ -163,16 +154,14 @@ struct history_heurestic_table
         return index;
     }
 
-    piece_square_history *get_continuation_history_table(const board_state &state, chess_move m)
+    piece_square_history *get_continuation_history_table(chess_move m)
     {
-        int is_cap = (state.get_square(m.to).get_type() != EMPTY);
-        int player_index = (state.get_turn() == WHITE ? 0 : 1);
+        return &continuation_history[m.is_capture()][m.get_moving_piece().d][m.to.index];
+    }
 
-        if (!m.valid()) {
-            return &continuation_history[0][player_index][0][0];
-        } else {
-            return &continuation_history[is_cap][player_index][state.get_square(m.from).get_type()][m.to.index];
-        }
+    piece_square_history *get_continuation_history_table_null(player_type_t turn)
+    {
+        return &continuation_history[0][turn][0];
     }
 
 
@@ -225,12 +214,12 @@ struct history_heurestic_table
 
     piece_square_history history;
     piece_square_history capture_history[8];
-    piece_square_history continuation_history[2][2][8][BOARD_HEIGHT*BOARD_WIDTH];
+    piece_square_history continuation_history[2][16][BOARD_HEIGHT*BOARD_WIDTH];
 
     int32_t pawn_correction_history[2][correction_pawn_table_size];
     int32_t material_correction_history[2][correction_material_table_size];
 
-    chess_move counter_moves[2][8][BOARD_HEIGHT*BOARD_WIDTH];
+    chess_move counter_moves[16][BOARD_HEIGHT*BOARD_WIDTH];
     chess_move killer_moves[MAX_DEPTH][KILLER_MOVE_SLOTS];
 
     bool experimental_features;

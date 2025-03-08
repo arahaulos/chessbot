@@ -285,17 +285,17 @@ void alphabeta_search::iterative_search(int max_depth)
         } else {
             auto ms = std::chrono::duration_cast<std::chrono::milliseconds>( t3 - t2 );
 
-            all_threads_stats.nodes -= total_nodes_searched;
+            uint64_t nodes = all_threads_stats.nodes - total_nodes_searched;
 
-            nps = (all_threads_stats.nodes*1000) / (ms.count()+1);
-            total_nodes_searched += all_threads_stats.nodes;
+            nps = (nodes*1000) / (ms.count()+1);
             max_depth_reached = all_threads_stats.max_distance_to_root;
 
+            total_nodes_searched = all_threads_stats.nodes;
             depth += 1;
 
 
             auto time_to_depth_ms = std::chrono::duration_cast<std::chrono::milliseconds>( t3 - t1 );
-            float million_nodes_per_sec = (float)(all_threads_stats.nodes) / (ms.count()*1000+1);
+            float million_nodes_per_sec = (float)nps / 1000000;
 
             if (print_search_info) {
                 std::cout << "done in " << std::setw(5)  << std::left << (float)time_to_depth_ms.count() / 1000 << "s  "
@@ -307,12 +307,13 @@ void alphabeta_search::iterative_search(int max_depth)
                                         << (double)all_threads_stats.fail_high_index / (all_threads_stats.fail_highs+1) << "\n";
             }
 
-
             //std::cout << "Quiets: " << all_threads_stats.cutoff_history / (all_threads_stats.cutoff_quiets+1) << "  Captures: " << all_threads_stats.cutoff_see / (all_threads_stats.cutoff_captures+1) << std::endl;
 
             //std::cout << all_threads_stats.good_lmr_history_score / all_threads_stats.good_lmrs << "  " << all_threads_stats.bad_lmr_history_score / all_threads_stats.bad_lmrs << std::endl;*/
         }
     }
+
+    total_nodes_searched = all_threads_stats.nodes;
 
     //std::cout << all_threads_stats.corrected_eval_error / (all_threads_stats.static_eval_error_samples+1) << "  " << all_threads_stats.static_eval_error / (all_threads_stats.static_eval_error_samples+1) << "\n";
 }
@@ -465,7 +466,7 @@ void alphabeta_search::search_root(int32_t window_alpha, int32_t window_beta, in
         chess_move root_move = it->first;
 
         sc.moves[0] = root_move;
-        sc.conthist[0] = sc.history.get_continuation_history_table(sc.state, root_move);
+        sc.conthist[0] = sc.history.get_continuation_history_table(root_move);
 
         line.first(root_move);
 
@@ -570,7 +571,7 @@ int32_t alphabeta_search::alphabeta(board_state &state, int32_t alpha, int32_t b
     bool is_cut = (expected_node_type == CUT_NODE);
     bool is_pv = (expected_node_type == PV_NODE);
 
-    uint64_t zhash = state.zhash;
+    uint64_t zhash = (skip_move == nullptr ? state.zhash : hashgen.get_singular_search_hash(state.zhash, *skip_move));
 
     if (alphabeta_abort_flag) {
         return INVALID_EVAL;
@@ -597,7 +598,7 @@ int32_t alphabeta_search::alphabeta(board_state &state, int32_t alpha, int32_t b
     int tt_node_type = ALL_NODE;
     int32_t tt_score = 0;
     int32_t tt_static_eval = 0;
-    bool tt_hit = move_cache[zhash].read(zhash, tt_move, tt_depth, tt_node_type, tt_score, tt_static_eval, ply);
+    bool tt_hit = move_cache[zhash].read(state, zhash, tt_move, tt_depth, tt_node_type, tt_score, tt_static_eval, ply);
 
     sc.stats.cache_hits += tt_hit;
     sc.stats.cache_misses += (!tt_hit);
@@ -607,7 +608,6 @@ int32_t alphabeta_search::alphabeta(board_state &state, int32_t alpha, int32_t b
     if (tt_hit &&
         !is_pv &&
         tt_depth >= depth &&
-        skip_move == nullptr &&
         state.half_move_clock < 90)
     {
         sc.static_eval[ply] = tt_static_eval;
@@ -692,7 +692,7 @@ int32_t alphabeta_search::alphabeta(board_state &state, int32_t alpha, int32_t b
 
         sc.moves[ply+1] = chess_move::null_move();
         sc.moves[ply] = chess_move::null_move();
-        sc.conthist[ply] = sc.history.get_continuation_history_table(state, chess_move::null_move());
+        sc.conthist[ply] = sc.history.get_continuation_history_table_null(state.get_turn());
         sc.stats.nodes += 1;
 
         unmove_data restore = state.make_null_move();
@@ -725,6 +725,16 @@ int32_t alphabeta_search::alphabeta(board_state &state, int32_t alpha, int32_t b
         }
     }
 
+
+    int32_t razoring_margin = sp.razoring_margin*depth;
+    if (!is_pv && !in_check && depth < 5 && eval + razoring_margin < alpha) {
+        int score = quisearch(state, alpha, beta, ply, sc.stats, false);
+        if (score < alpha) {
+            return score;
+        }
+    }
+
+
     //IIR ~22elo at 1s + 20ms time control
     //If this unexplored part of tree proves to be important, there will be tt hits at next search
     if ((is_pv || is_cut) && depth >= 3 && !tt_hit) {
@@ -735,29 +745,32 @@ int32_t alphabeta_search::alphabeta(board_state &state, int32_t alpha, int32_t b
     if (tt_hit &&
         tt_node_type == CUT_NODE &&
         tt_depth >= (depth-3) &&
-        tt_score >= beta &&
         depth > 5 &&
         skip_move == nullptr &&
+        !is_mate_score(tt_score) &&
         ply + depth < 2*nominal_search_depth)
     {
         int32_t singular_beta = tt_score - (2*depth);
-        int32_t score = alphabeta(state, singular_beta-1, singular_beta, depth / 2, ply, sc, line, &tt_move, ALL_NODE);
+        int32_t score = alphabeta(state, singular_beta-1, singular_beta, depth / 2, ply, sc, line, &tt_move, (is_cut ? CUT_NODE : ALL_NODE));
 
         if (score < singular_beta) {
             //Singular extension >60 elo
             //TT move is better than rest of the moves. This node is singular and should be searcher with more carefully
-            tt_move_extensions += 2;
+            tt_move_extensions += 1 + (score + 10*depth < tt_score);
         } else if (singular_beta >= beta && !is_mate_score(score) && !is_pv) {
             //Multicut. ~10 Elo
             //We have proved that there is multiple moves that fails-high in this node
             //Changes that deeper search doesn't fail high is very low
             return singular_beta;
-        } else if (!is_pv) {
+        } else if (tt_score >= beta && !is_pv) {
             //~5 elo
             //Singular beta wasn't enough high to get cut-off. Other moves are also good. Reducting tt moves depth to get other moves changes to shine
+            tt_move_extensions -= 2;
+        } else if (is_cut) {
             tt_move_extensions -= 1;
         }
     }
+
 
     move_picker &mpicker = sc.move_pickers[ply];
     mpicker.init(state, ply, tt_move, threat_move, sc.history, experimental_features);
@@ -773,17 +786,15 @@ int32_t alphabeta_search::alphabeta(board_state &state, int32_t alpha, int32_t b
             mpicker.previus_pick_was_skipped(mov);
             continue;
         }
-        piece moving_piece = state.get_square(mov.from);
-
         bool causes_check = state.causes_check(mov, next_turn(state.get_turn()));
-        bool is_en_passant = (moving_piece.get_type() == PAWN && mov.to == state.en_passant_square && (state.flags & EN_PASSANT_AVAILABLE) != 0);
-        bool is_capture = (state.get_square(mov.to).get_type() != EMPTY || is_en_passant);
+        bool is_capture = mov.is_capture();
         bool is_promotion = (mov.promotion != 0);
+
 
         int extensions = (move_type == TT_MOVE ? tt_move_extensions : 0);
         int reductions = (int)(std::log2(depth) * std::log2(std::max(1, mpicker.legal_moves - is_pv)) * ((float)sp.lmr_modifier) / 100.0f);
 
-        int32_t history_score = (is_capture ? sc.history.get_capture_history(state, mov) : sc.history.get_quiet_history(state, ply, mov));
+        int32_t history_score = (is_capture ? sc.history.get_capture_history(mov) : sc.history.get_quiet_history(ply, mov));
 
         reductions -= (history_score / sp.lmr_hist_adjust);
 
@@ -864,13 +875,18 @@ int32_t alphabeta_search::alphabeta(board_state &state, int32_t alpha, int32_t b
             if (move_type == KILLER_MOVE) {
                 reductions -= 1;
             }
+
+            if (is_capture) {
+                reductions /= 2;
+            }
+
             reductions = std::clamp(reductions, 1, new_depth/2);
 
             reduced_depth = new_depth - reductions;
         }
 
         sc.moves[ply] = mov;
-        sc.conthist[ply] = sc.history.get_continuation_history_table(state, mov);
+        sc.conthist[ply] = sc.history.get_continuation_history_table(mov);
 
         sc.stats.nodes += 1;
 
@@ -947,9 +963,9 @@ int32_t alphabeta_search::alphabeta(board_state &state, int32_t alpha, int32_t b
         }
     }
 
-    if (is_score_valid(best_score) && best_move.valid() && skip_move == nullptr) {
+    if (is_score_valid(best_score) && best_move.valid()) {
         //Update static evaluation correction history
-        if (!is_mate_score(best_score) && (state.get_square(best_move.to).get_type() == EMPTY) && !in_check) {
+        if (!is_mate_score(best_score) && !best_move.is_capture() && !in_check && skip_move == nullptr) {
 
             if ((node_type == CUT_NODE && raw_eval < best_score) ||
                 (node_type == ALL_NODE && raw_eval > best_score) ||
@@ -959,7 +975,7 @@ int32_t alphabeta_search::alphabeta(board_state &state, int32_t alpha, int32_t b
         }
         //Update move ordering heurestics. Move picker stores moves that were tried.
         if (node_type == CUT_NODE) {
-            sc.history.update(state, best_move, depth, ply, mpicker.picked_quiet_moves, mpicker.picked_quiet_count, mpicker.picked_captures, mpicker.picked_capture_count);
+            sc.history.update(best_move, depth, ply, mpicker.picked_quiet_moves, mpicker.picked_quiet_count, mpicker.picked_captures, mpicker.picked_capture_count);
         }
 
         //If we have tt move and all moves failed low,
@@ -989,7 +1005,7 @@ int32_t alphabeta_search::quisearch(board_state &state, int32_t alpha, int32_t b
     int tt_node_type = ALL_NODE;
     int32_t tt_score = 0;
     int32_t tt_static_eval = 0;
-    bool tt_hit = move_cache[state.zhash].read(state.zhash, tt_move, tt_depth, tt_node_type, tt_score, tt_static_eval, ply);
+    bool tt_hit = move_cache[state.zhash].read(state, state.zhash, tt_move, tt_depth, tt_node_type, tt_score, tt_static_eval, ply);
 
     if (!is_pv &&
         tt_hit &&

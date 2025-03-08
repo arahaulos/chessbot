@@ -32,6 +32,8 @@ struct search_params
         lmr_hist_adjust = 7079;
         see_margin_mult = 120;
         lmr_modifier = 17;
+
+        razoring_margin = 200;
     }
 
 
@@ -49,12 +51,14 @@ struct search_params
             int lmr_hist_adjust;
             int see_margin_mult;
             int lmr_modifier;
+
+            int razoring_margin;
         };
-        int data[9];
+        int data[10];
     };
 
     static int get_variable_index(std::string name) {
-        for (int i = 0; i < 9; i++) {
+        for (int i = 0; i < 10; i++) {
             if (name == get_variable_name(i)) {
                 return i;
             }
@@ -74,16 +78,17 @@ struct search_params
             "lmr_hist_adjust",
             "see_margin_mult",
             "lmr_modifier"
+            "razoring_margin"
         };
 
-        if (index >= 0 && index < 9) {
+        if (index >= 0 && index < 10) {
             return std::string(str[index]);
         }
         return std::string("check that fucking index");
     }
 
     static void get_limits(int index, int &minv, int &maxv) {
-        int limits[18] = {
+        int limits[20] = {
             0, 100,
             40, 140,
             20, 100,
@@ -92,10 +97,11 @@ struct search_params
             2000, 10000,
             4000, 10000,
             80, 200,
-            10, 30
+            10, 30,
+            150, 300
         };
 
-        if (index >= 0 && index < 9) {
+        if (index >= 0 && index < 10) {
             minv = limits[index*2 + 0];
             maxv = limits[index*2 + 1];
         }

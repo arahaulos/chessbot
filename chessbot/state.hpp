@@ -100,19 +100,75 @@ struct square_index
     }
 };
 
+struct piece
+{
+    piece() {};
+
+    piece(player_type_t player, piece_type_t type) {
+        d = player | type;
+    }
+    piece(piece_player_type_t type) {
+        d = type;
+    }
+
+    inline player_type_t get_player() const {
+        return static_cast<player_type_t>(d & 0x8);
+    }
+
+    inline piece_type_t get_type() const {
+        return static_cast<piece_type_t>(d & 0x7);
+    }
+
+    bool operator == (const piece &p) const {
+        return (d == p.d);
+    }
+
+    bool operator != (const piece &p) const {
+        return (d != p.d);
+    }
+
+    std::string to_string() {
+        return player_to_str(get_player()) + " " + piece_to_str(get_type());
+    }
+
+    uint8_t d;
+};
+
 struct chess_move
 {
     square_index from;
     square_index to;
 
     piece_type_t promotion;
+    uint8_t extra_info;
 
     static chess_move null_move() {
         chess_move nm;
         nm.promotion = EMPTY;
         nm.to.index = 0;
         nm.from.index = 0;
+        nm.extra_info = 0;
         return nm;
+    }
+
+    static uint8_t encode_moving_piece_info(piece p) {
+        return ((uint8_t)p.d << 4);
+    }
+
+    static uint8_t encode_captured_piece_info(piece p) {
+        return ((uint8_t)p.d & 0xF);
+    }
+
+    piece get_captured_piece() const {
+        return piece((piece_player_type_t)(extra_info & 0xF));
+    }
+
+    piece get_moving_piece() const {
+        return piece((piece_player_type_t)((extra_info >> 4) & 0xF));
+    }
+
+    bool is_capture() const {
+        return ((extra_info & 0xF) != 0);
     }
 
     inline bool operator == (const chess_move &other) const {
@@ -160,35 +216,6 @@ struct chess_move
     }
 };
 
-struct piece
-{
-    piece() {};
-
-    piece(player_type_t player, piece_type_t type) {
-        d = player | type;
-    }
-    piece(piece_player_type_t type) {
-        d = type;
-    }
-
-    inline player_type_t get_player() const {
-        return static_cast<player_type_t>(d & 0x8);
-    }
-
-    inline piece_type_t get_type() const {
-        return static_cast<piece_type_t>(d & 0x7);
-    }
-
-    bool operator == (const piece &p) const {
-        return (d == p.d);
-    }
-
-    bool operator != (const piece &p) const {
-        return (d != p.d);
-    }
-
-    uint8_t d;
-};
 
 struct unmove_data
 {

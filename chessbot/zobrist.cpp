@@ -35,10 +35,16 @@ zobrist::zobrist()
 
     for (int i = 0; i < BOARD_WIDTH; i++) {
         en_passant_xor[i] = rand_bitstring();
+        singular_search_promotion[i] = rand_bitstring();
     }
 
     for (int i = 0; i < 4; i++) {
         castling_xor[i] = rand_bitstring();
+    }
+
+    for (int i = 0; i < 64; i++) {
+        singular_search_hashing_from[i] = rand_bitstring();
+        singular_search_hashing_to[i] = rand_bitstring();
     }
 }
 

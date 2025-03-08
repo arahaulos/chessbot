@@ -22,15 +22,15 @@ enum node_type_t {PV_NODE = 1, CUT_NODE = 2, ALL_NODE = 3};
 
 
 
-enum piece_type_t {PAWN = 1, KNIGHT = 2, BISHOP = 3, ROOK = 4, QUEEN = 5, KING = 6, EMPTY = 0};
+enum piece_type_t: unsigned char {PAWN = 1, KNIGHT = 2, BISHOP = 3, ROOK = 4, QUEEN = 5, KING = 6, EMPTY = 0};
 enum player_type_t: unsigned char {WHITE = 0x00, BLACK = 0x8, EMPTY_COLOR = WHITE};
 
 
 enum board_state_flags {WHITE_QSIDE_CASTLE_VALID = (1 << 0), WHITE_KSIDE_CASTLE_VALID = (1 << 1), BLACK_QSIDE_CASTLE_VALID = (1 << 2), BLACK_KSIDE_CASTLE_VALID = (1 << 3), EN_PASSANT_AVAILABLE = (1 << 4), NULL_MOVE = (1 << 5), INCREMENT_NNUE = (1 << 6)};
 
 
-enum piece_player_type_t {WHITE_PAWN = 1,       WHITE_KNIGHT = 2,       WHITE_BISHOP = 3,       WHITE_ROOK = 4,       WHITE_QUEEN = 5,       WHITE_KING = 6,
-                          BLACK_PAWN = 1 | 0x8, BLACK_KNIGHT = 2 | 0x8, BLACK_BISHOP = 3 | 0x8, BLACK_ROOK = 4 | 0x8, BLACK_QUEEN = 5 | 0x8, BLACK_KING = 6 | 0x8};
+enum piece_player_type_t: unsigned char {WHITE_PAWN = 1,       WHITE_KNIGHT = 2,       WHITE_BISHOP = 3,       WHITE_ROOK = 4,       WHITE_QUEEN = 5,       WHITE_KING = 6,
+                                         BLACK_PAWN = 1 | 0x8, BLACK_KNIGHT = 2 | 0x8, BLACK_BISHOP = 3 | 0x8, BLACK_ROOK = 4 | 0x8, BLACK_QUEEN = 5 | 0x8, BLACK_KING = 6 | 0x8};
 
 
 constexpr int32_t MAX_EVAL = std::numeric_limits<int32_t>::max() - 65536;
