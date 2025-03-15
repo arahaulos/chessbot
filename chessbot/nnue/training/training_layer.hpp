@@ -134,7 +134,15 @@ struct training_layer_weights
         float clamp_max = layer_quantization_clamp_max;
         int fracs = layer_quantization_fractions;
         float quant_correction_frac = 1.0f;
-        if (INPUTS == total_halfkp_outputs) {
+
+        if (INPUTS == 2*num_perspective_neurons && NEURONS == 1) {
+            clamp_min = output_quantization_clamp_min;
+            clamp_max = output_quantization_clamp_max;
+            fracs = output_quantization_fractions;
+
+            quant_correction_frac = (double)output_quantization_fractions / (double)halfkp_quantization_fractions;
+
+        } else if (INPUTS == 2*num_perspective_neurons) {
             quant_correction_frac = (double)layer_quantization_fractions / (double)halfkp_quantization_fractions;
         } else if (NEURONS == 1) {
             clamp_min = output_quantization_clamp_min;

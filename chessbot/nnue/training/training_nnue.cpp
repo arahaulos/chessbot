@@ -43,11 +43,10 @@ float training_network::evaluate(const board_state &s)
     white_side.update();
     black_side.update();
     if (s.get_turn() == WHITE) {
-        layer0.update(white_side.neurons, black_side.neurons);
+        output_layer.update(white_side.neurons, black_side.neurons);
     } else {
-        layer0.update(black_side.neurons, white_side.neurons);
+        output_layer.update(black_side.neurons, white_side.neurons);
     }
-    output_layer.update(layer0.neurons);
 
     return output_layer.neurons[0];
 }
@@ -111,12 +110,10 @@ float training_network::evaluate(const training_position &tp)
     white_side.update();
     black_side.update();
     if (tp.get_turn() == WHITE) {
-        layer0.update(white_side.neurons, black_side.neurons);
+        output_layer.update(white_side.neurons, black_side.neurons);
     } else {
-        layer0.update(black_side.neurons, white_side.neurons);
+        output_layer.update(black_side.neurons, white_side.neurons);
     }
-    output_layer.update(layer0.neurons);
-
     return output_layer.neurons[0];
 }
 
@@ -126,7 +123,6 @@ void training_weights::save_file(std::string path)
     std::ofstream file(path.c_str(), std::ios::binary);
     if (file.is_open()) {
         perspective_weights.save(file);
-        layer0_weights.save(file);
         output_weights.save(file);
     }
     file.close();
@@ -143,7 +139,6 @@ void training_weights::load_file(std::string path)
         bool big_net = (s > 1024*1024*8);
 
         perspective_weights.load(file, big_net);
-        layer0_weights.load(file);
         output_weights.load(file);
     }
     file.close();
@@ -155,7 +150,6 @@ void training_weights::save_quantized(std::string path)
     std::ofstream file(path.c_str(), std::ios::binary);
     if (file.is_open()) {
         perspective_weights.save_quantized(file);
-        layer0_weights.save_quantized(file);
         output_weights.save_quantized(file);
     }
     file.close();

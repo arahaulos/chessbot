@@ -83,31 +83,26 @@ inline int encode_factorizer_input(int type, int color, int sq_index, int king_s
 struct training_weights
 {
     training_perspective_weights<num_perspective_inputs + factorizer_inputs, num_perspective_neurons> perspective_weights;
-    training_layer_weights<num_perspective_neurons*2, num_hidden_layer_neurons> layer0_weights;
-    training_layer_weights<num_hidden_layer_neurons, 1> output_weights;
+    training_layer_weights<num_perspective_neurons*2, 1> output_weights;
 
 
     void copy_from(const training_weights &other) {
         perspective_weights.copy_from(other.perspective_weights);
-        layer0_weights.copy_from(other.layer0_weights);
         output_weights.copy_from(other.output_weights);
     }
 
     void add(const training_weights &other) {
         perspective_weights.add(other.perspective_weights);
-        layer0_weights.add(other.layer0_weights);
         output_weights.add(other.output_weights);
     }
 
     void mult(float val) {
         perspective_weights.mult(val);
-        layer0_weights.mult(val);
         output_weights.mult(val);
     }
 
     void squared(training_weights &other) {
         perspective_weights.squared(other.perspective_weights);
-        layer0_weights.squared(other.layer0_weights);
         output_weights.squared(other.output_weights);
     }
 
@@ -115,20 +110,17 @@ struct training_weights
         float inv_val = 1.0f / val;
 
         perspective_weights.mult(inv_val);
-        layer0_weights.mult(inv_val);
         output_weights.mult(inv_val);
     }
 
     void zero() {
         perspective_weights.zero();
-        layer0_weights.zero();
         output_weights.zero();
     }
 
     void normalize()
     {
         perspective_weights.normalize();
-        layer0_weights.normalize();
         output_weights.normalize();
     }
 
@@ -144,7 +136,6 @@ struct training_network
 {
     training_network(std::shared_ptr<training_weights> w): black_side(&w->perspective_weights),
                                                            white_side(&w->perspective_weights),
-                                                           layer0(&w->layer0_weights),
                                                            output_layer(&w->output_weights), weights(w) { use_factorizer = true;};
 
     float evaluate(const board_state &s);
@@ -154,9 +145,7 @@ struct training_network
 
     training_perspective<num_perspective_inputs + factorizer_inputs, num_perspective_neurons> black_side;
     training_perspective<num_perspective_inputs + factorizer_inputs, num_perspective_neurons> white_side;
-    training_layer<num_perspective_neurons*2, num_hidden_layer_neurons> layer0;
-    training_layer<num_hidden_layer_neurons, 1> output_layer;
-
+    training_layer<num_perspective_neurons*2, 1> output_layer;
 
     std::shared_ptr<training_weights> weights;
 };

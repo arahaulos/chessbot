@@ -68,7 +68,7 @@ struct search_params
 
     static std::string get_variable_name(int index)
     {
-        const char *str[9] = {
+        const char *str[10] = {
             "rfmargin_base",
             "rfmargin_mult",
             "rfmargin_improving_modifier",
@@ -77,7 +77,7 @@ struct search_params
             "hmargin_mult",
             "lmr_hist_adjust",
             "see_margin_mult",
-            "lmr_modifier"
+            "lmr_modifier",
             "razoring_margin"
         };
 

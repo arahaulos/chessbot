@@ -26,44 +26,46 @@ void randomize_floats(float *f, int n, float std_mean, float std_deviation, std:
 }
 
 
-void init_weights(training_weights &weights)
+void init_weights(training_weights &weights, bool init_perspectives_weights)
 {
     std::random_device rd{};
     std::mt19937 gen{rd()};
 
-    weights.zero();
+
+    if (init_perspectives_weights) {
+        weights.zero();
+    }
 
 
-    float output_deviation = sqrt(2.0f / weights.layer0_weights.num_of_biases());
-    float layer0_deviation = sqrt(1.0f / weights.perspective_weights.num_of_biases());
+    float output_deviation = sqrt(1.0f / weights.perspective_weights.num_of_biases());
     float perspective_deviation = sqrt(2.0f / 768.0f);
 
 
     randomize_floats(weights.output_weights.weights, weights.output_weights.num_of_weights(), 0, output_deviation, gen);
     randomize_floats(weights.output_weights.biases, weights.output_weights.num_of_biases(), 0, output_deviation, gen);
 
-    randomize_floats(weights.layer0_weights.weights, weights.layer0_weights.num_of_weights(), 0, layer0_deviation, gen);
-    randomize_floats(weights.layer0_weights.biases, weights.layer0_weights.num_of_biases(), 0, layer0_deviation, gen);
 
-    randomize_floats(weights.perspective_weights.biases, weights.perspective_weights.num_of_biases(), 0, perspective_deviation, gen);
-    /*std::normal_distribution nd{0.0f, perspective_deviation};
-    for (size_t i = 0; i < inputs_per_bucket; i++) {
-        for (size_t j = 0; j < num_perspective_neurons; j++) {
+    if (init_perspectives_weights) {
+        randomize_floats(weights.perspective_weights.biases, weights.perspective_weights.num_of_biases(), 0, perspective_deviation, gen);
+        /*std::normal_distribution nd{0.0f, perspective_deviation};
+        for (size_t i = 0; i < inputs_per_bucket; i++) {
+            for (size_t j = 0; j < num_perspective_neurons; j++) {
 
-            size_t input = num_of_king_buckets*inputs_per_bucket + i;
+                size_t input = num_of_king_buckets*inputs_per_bucket + i;
 
-            weights.perspective_weights.weights[input*num_perspective_neurons + j] = nd(gen);
+                weights.perspective_weights.weights[input*num_perspective_neurons + j] = nd(gen);
 
-        }
-    }*/
+            }
+        }*/
 
-    for (size_t i = 0; i < inputs_per_bucket; i++) {
-        for (size_t j = 0; j < num_perspective_neurons; j++) {
+        for (size_t i = 0; i < inputs_per_bucket; i++) {
+            for (size_t j = 0; j < num_perspective_neurons; j++) {
 
-            size_t input = num_of_king_buckets*inputs_per_bucket + i;
+                size_t input = num_of_king_buckets*inputs_per_bucket + i;
 
-            weights.perspective_weights.weights[input*num_perspective_neurons + j] = 0.01f;
+                weights.perspective_weights.weights[input*num_perspective_neurons + j] = 0.01f;
 
+            }
         }
     }
 }
@@ -74,14 +76,12 @@ void init_weights(training_weights &weights)
 void gradient_descent(training_weights &weights, training_weights &grad, float learning_rate)
 {
     weights.output_weights.gradient_descent(&grad.output_weights, learning_rate);
-    weights.layer0_weights.gradient_descent(&grad.layer0_weights, learning_rate);
     weights.perspective_weights.gradient_descent(&grad.perspective_weights, learning_rate);
 }
 
 void rmsprop(training_weights &weights, training_weights &grad, training_weights &past_gradients, float learning_rate)
 {
     weights.output_weights.rmsprop(&grad.output_weights, &past_gradients.output_weights, learning_rate);
-    weights.layer0_weights.rmsprop(&grad.layer0_weights, &past_gradients.layer0_weights, learning_rate);
     weights.perspective_weights.rmsprop(&grad.perspective_weights, &past_gradients.perspective_weights, learning_rate);
 }
 
@@ -90,12 +90,10 @@ void back_propagate(training_network &net, training_weights &grad, float loss_de
 {
     net.output_layer.grads[0] = loss_delta;
 
-    net.output_layer.back_propagate(&grad.output_weights, net.layer0.grads, net.layer0.neurons);
-
     if (stm == WHITE) {
-        net.layer0.back_propagate(&grad.layer0_weights, net.white_side.grads, net.black_side.grads, net.white_side.neurons, net.black_side.neurons);
+        net.output_layer.back_propagate(&grad.output_weights, net.white_side.grads, net.black_side.grads, net.white_side.neurons, net.black_side.neurons);
     } else {
-        net.layer0.back_propagate(&grad.layer0_weights, net.black_side.grads, net.white_side.grads, net.black_side.neurons, net.white_side.neurons);
+        net.output_layer.back_propagate(&grad.output_weights, net.black_side.grads, net.white_side.grads, net.black_side.neurons, net.white_side.neurons);
     }
 
     net.white_side.back_propagate(&grad.perspective_weights);
@@ -480,10 +478,10 @@ void training_loop(std::string net_file, std::string qnet_file, std::shared_ptr<
 
     training_network net(weights);
 
-    float learning_rate = 0.00001f;
+    float learning_rate = 0.0001f;
     float beta1 = 0.9f;
     float beta2 = 0.999f;
-    int batch_size = 4000*thread_pool.get_pool_size();
+    int batch_size = 16000*thread_pool.get_pool_size();
     int epoch_size = 100000000;
     float min_lambda = 0.25f;
     float max_lambda = 0.50f;
@@ -526,7 +524,6 @@ void training_loop(std::string net_file, std::string qnet_file, std::shared_ptr<
 
         gradient_sq.squared(gradient);
 
-
         first_moment.mult(beta1);
         gradient.mult(1.0f - beta1);
         first_moment.add(gradient);
@@ -541,7 +538,7 @@ void training_loop(std::string net_file, std::string qnet_file, std::shared_ptr<
         corrected_first_moment.mult(1.0f / (1.0f - beta1));
         corrected_second_moment.mult(1.0f / (1.0f - beta2));
 
-        //gradient_descent(*weights, gradient_with_momentum, learning_rate);
+        //gradient_descent(*weights, first_moment, learning_rate);
         rmsprop(*weights, corrected_first_moment, corrected_second_moment, learning_rate);
 
         if (std::chrono::duration_cast<std::chrono::seconds>( t0 - last_save_time ).count() > 60) {
@@ -570,8 +567,12 @@ void nnue_trainer::train(std::string net_file, std::string qnet_file, std::vecto
 
     std::shared_ptr<training_weights> weights = std::make_shared<training_weights>();
 
-    init_weights(*weights);
+    init_weights(*weights, true);
     weights->load_file(net_file);
+
+
+    //weights->load_file("netkb16d_2.nnue");
+    //init_weights(*weights, false);
 
     training_loop(net_file, qnet_file, weights, reader);
 }

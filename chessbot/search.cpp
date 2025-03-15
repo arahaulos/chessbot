@@ -562,6 +562,7 @@ int32_t alphabeta_search::static_evaluation(const board_state &state, player_typ
 }
 
 
+
 int32_t alphabeta_search::alphabeta(board_state &state, int32_t alpha, int32_t beta, int depth, int ply, search_context &sc, pv_table &pv, chess_move *skip_move, node_type_t expected_node_type)
 {
     sc.stats.max_distance_to_root = std::max(sc.stats.max_distance_to_root, ply);
@@ -738,7 +739,7 @@ int32_t alphabeta_search::alphabeta(board_state &state, int32_t alpha, int32_t b
     //IIR ~22elo at 1s + 20ms time control
     //If this unexplored part of tree proves to be important, there will be tt hits at next search
     if ((is_pv || is_cut) && depth >= 3 && !tt_hit) {
-        depth -= 2;
+        depth -= 1;
     }
 
     int tt_move_extensions = 0;
@@ -1119,8 +1120,6 @@ int32_t alphabeta_search::quisearch(board_state &state, int32_t alpha, int32_t b
     }
     return best_score;
 }
-
-
 
 
 

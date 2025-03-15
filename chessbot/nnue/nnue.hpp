@@ -23,8 +23,7 @@ struct nnue_weights
     nnue_weights();
 
     nnue_perspective_weights<num_perspective_inputs, num_perspective_neurons> perspective_weights;
-    nnue_layer_weights<num_perspective_neurons*2, num_hidden_layer_neurons> layer0_weights;
-    nnue_layer_weights<num_hidden_layer_neurons, 1> output_weights;
+    nnue_layer_weights<num_perspective_neurons*2, 1> output_weights;
 
     int rescale_factor0;
     int rescale_factor1;
@@ -40,7 +39,6 @@ struct nnue_network
     nnue_network(std::shared_ptr<nnue_weights> w): weights(w),
                                                    black_side(&w->perspective_weights),
                                                    white_side(&w->perspective_weights),
-                                                   layer0(&w->layer0_weights),
                                                    output_layer(&w->output_weights) {};
 
 
@@ -91,6 +89,5 @@ struct nnue_network
 private:
     nnue_perspective<num_perspective_inputs, num_perspective_neurons> black_side;
     nnue_perspective<num_perspective_inputs, num_perspective_neurons> white_side;
-    nnue_layer<num_perspective_neurons*2, num_hidden_layer_neurons> layer0;
-    nnue_layer<num_hidden_layer_neurons, 1> output_layer;
+    nnue_layer<num_perspective_neurons*2, 1> output_layer;
 };

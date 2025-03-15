@@ -16,6 +16,8 @@ application::application()
     alphabeta->print_search_info = false;
     alphabeta->use_opening_book = false;
 
+    //alphabeta->load_nnue_net("qnetkb16d2_1.nnue");
+
     uci = std::make_shared<uci_interface>(alphabeta, game);
 
     game->get_state().set_initial_state();

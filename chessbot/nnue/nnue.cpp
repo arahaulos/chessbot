@@ -93,11 +93,10 @@ int16_t nnue_network::evaluate(const board_state &s)
     white_side.update();
     black_side.update();
     if (s.get_turn() == WHITE) {
-        layer0.update(white_side.neurons, black_side.neurons);
+        output_layer.update(white_side.neurons, black_side.neurons);
     } else {
-        layer0.update(black_side.neurons, white_side.neurons);
+        output_layer.update(black_side.neurons, white_side.neurons);
     }
-    output_layer.update(layer0.neurons);
 
     return (output_layer.out * 100 * weights->rescale_factor0) / (output_quantization_fractions * weights->rescale_factor1);
 }
@@ -152,11 +151,10 @@ int16_t nnue_network::evaluate(player_type_t turn)
     white_side.update();
     black_side.update();
     if (turn == WHITE) {
-        layer0.update(white_side.neurons, black_side.neurons);
+        output_layer.update(white_side.neurons, black_side.neurons);
     } else {
-        layer0.update(black_side.neurons, white_side.neurons);
+        output_layer.update(black_side.neurons, white_side.neurons);
     }
-    output_layer.update(layer0.neurons);
 
     return (output_layer.out * 100 * weights->rescale_factor0) / (output_quantization_fractions * weights->rescale_factor1);
 }
@@ -179,7 +177,6 @@ nnue_weights::nnue_weights()
 
     size_t index = 0;
     perspective_weights.load((int16_t*)embedded_weights_data, index, big_net);
-    layer0_weights.load((int16_t*)embedded_weights_data, index);
     output_weights.load((int16_t*)embedded_weights_data, index);
 }
 
@@ -196,7 +193,6 @@ void nnue_weights::load(std::string path)
         big_net = (s > 1024*1024*4);
 
         perspective_weights.load(file, big_net);
-        layer0_weights.load(file);
         output_weights.load(file);
     }
     file.close();
