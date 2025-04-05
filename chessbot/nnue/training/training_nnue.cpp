@@ -16,6 +16,8 @@ float training_network::evaluate(const board_state &s)
     white_side.king_bucket = get_king_bucket(white_king_sq);
     black_side.king_bucket = get_king_bucket(black_king_sq);
 
+    bitboard non_pawn_pieces = (s.pieces_by_color[0] | s.pieces_by_color[1]) & ~(s.bitboards[PAWN][0] | s.bitboards[PAWN][1] | s.bitboards[KING][0] | s.bitboards[KING][1]);
+
     for (int i = 0; i < 64; i++) {
         piece p = s.get_square(i);
 
@@ -42,13 +44,16 @@ float training_network::evaluate(const board_state &s)
 
     white_side.update();
     black_side.update();
+
+    output_bucket = encode_output_bucket(non_pawn_pieces);
+
     if (s.get_turn() == WHITE) {
-        output_layer.update(white_side.neurons, black_side.neurons);
+        output_layer.update(output_bucket, white_side.neurons, black_side.neurons);
     } else {
-        output_layer.update(black_side.neurons, white_side.neurons);
+        output_layer.update(output_bucket, black_side.neurons, white_side.neurons);
     }
 
-    return output_layer.neurons[0];
+    return output_layer.neurons[output_bucket];
 }
 
 float training_network::evaluate(const training_position &tp)
@@ -88,8 +93,14 @@ float training_network::evaluate(const training_position &tp)
     occupation = tp.occupation;
     index = 0;
 
+    bitboard non_pawn_pieces = 0;
+
     for (int i = 0; i < num_of_pieces; i++) {
         p.d = tp.iterate_pieces(occupation, index, sq_index);
+
+        if (p.get_type() != PAWN && p.get_type() != KING) {
+            non_pawn_pieces |= ((uint64_t)0x1 << sq_index);
+        }
 
         int type = p.get_type();
         int color = p.get_player();
@@ -107,14 +118,16 @@ float training_network::evaluate(const training_position &tp)
         }
     }
 
+    output_bucket = encode_output_bucket(non_pawn_pieces);
+
     white_side.update();
     black_side.update();
     if (tp.get_turn() == WHITE) {
-        output_layer.update(white_side.neurons, black_side.neurons);
+        output_layer.update(output_bucket, white_side.neurons, black_side.neurons);
     } else {
-        output_layer.update(black_side.neurons, white_side.neurons);
+        output_layer.update(output_bucket, black_side.neurons, white_side.neurons);
     }
-    return output_layer.neurons[0];
+    return output_layer.neurons[output_bucket];
 }
 
 
@@ -136,9 +149,7 @@ void training_weights::load_file(std::string path)
         size_t s = file.tellg();
         file.seekg(0, std::ios::beg);
 
-        bool big_net = (s > 1024*1024*8);
-
-        perspective_weights.load(file, big_net);
+        perspective_weights.load(file);
         output_weights.load(file);
     }
     file.close();

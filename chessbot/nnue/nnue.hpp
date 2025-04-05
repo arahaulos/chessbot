@@ -23,14 +23,13 @@ struct nnue_weights
     nnue_weights();
 
     nnue_perspective_weights<num_perspective_inputs, num_perspective_neurons> perspective_weights;
-    nnue_layer_weights<num_perspective_neurons*2, 1> output_weights;
+    nnue_layer_weights<num_perspective_neurons*2, output_buckets> output_weights;
 
     int rescale_factor0;
     int rescale_factor1;
 
-    bool big_net;
-
     void load(std::string path);
+    void load_sb(std::string path);
 };
 
 
@@ -46,7 +45,7 @@ struct nnue_network
 
     void refresh(const board_state &s, player_type_t stm);
 
-    int16_t evaluate(player_type_t turn);
+    int16_t evaluate(player_type_t turn, int output_bucket);
 
     void set_piece(piece p, square_index sq, square_index white_king_sq, square_index black_king_sq);
     void unset_piece(piece p, square_index sq, square_index white_king_sq, square_index black_king_sq);
@@ -89,5 +88,5 @@ struct nnue_network
 private:
     nnue_perspective<num_perspective_inputs, num_perspective_neurons> black_side;
     nnue_perspective<num_perspective_inputs, num_perspective_neurons> white_side;
-    nnue_layer<num_perspective_neurons*2, 1> output_layer;
+    nnue_layer<num_perspective_neurons*2, output_buckets, true> output_layer;
 };

@@ -73,10 +73,6 @@ alphabeta_search::alphabeta_search(const alphabeta_search &other): move_cache(ot
     }
 }
 
-void alphabeta_search::load_nnue_net(std::string path)
-{
-    shared_nnue_weights->load(path);
-}
 
 int32_t alphabeta_search::get_transpostion_table_usage_permill()
 {
@@ -149,7 +145,6 @@ void alphabeta_search::new_game()
         thread_datas[i]->history.reset();
     }
 }
-
 
 
 void alphabeta_search::stop_search()
@@ -554,7 +549,7 @@ int32_t alphabeta_search::static_evaluation(const board_state &state, player_typ
     } else {
         stats.eval_cache_misses++;
 
-        score = state.nnue->evaluate(player);
+        score = state.nnue->evaluate(player, encode_output_bucket(state.get_non_pawn_pieces_bb()));
 
         eval_cache[state.zhash].write(state.zhash, score);
     }
@@ -765,13 +760,12 @@ int32_t alphabeta_search::alphabeta(board_state &state, int32_t alpha, int32_t b
             return singular_beta;
         } else if (tt_score >= beta && !is_pv) {
             //~5 elo
-            //Singular beta wasn't enough high to get cut-off. Other moves are also good. Reducting tt moves depth to get other moves changes to shine
+            //Singular beta wasn't enough high to get cut-off. Other moves are also good.
             tt_move_extensions -= 2;
         } else if (is_cut) {
             tt_move_extensions -= 1;
         }
     }
-
 
     move_picker &mpicker = sc.move_pickers[ply];
     mpicker.init(state, ply, tt_move, threat_move, sc.history, experimental_features);

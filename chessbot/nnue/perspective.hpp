@@ -19,32 +19,18 @@ struct nnue_perspective_weights
         delete [] biases_buffer;
     }
 
-    void load(std::istream &stream, bool big_net) {
-        if (big_net) {
-            stream.read((char*)weights, (NEURONS*INPUTS)*sizeof(int16_t));
-            stream.read((char*)biases, NEURONS*sizeof(int16_t));
-        } else {
-            stream.read((char*)weights, (NEURONS*inputs_per_bucket)*sizeof(int16_t));
-            stream.read((char*)biases, NEURONS*sizeof(int16_t));
-        }
+    void load(std::istream &stream) {
+        stream.read((char*)weights, (NEURONS*INPUTS)*sizeof(int16_t));
+        stream.read((char*)biases, NEURONS*sizeof(int16_t));
     }
 
-    void load(int16_t *data, size_t &index, bool big_net)
+    void load(int16_t *data, size_t &index)
     {
-        if (big_net) {
-            for (size_t i = 0; i < NEURONS*INPUTS; i++) {
-                weights[i] = data[index++];
-            }
-            for (size_t i = 0; i < NEURONS; i++) {
-                biases[i] = data[index++];
-            }
-        } else {
-            for (size_t i = 0; i < NEURONS*inputs_per_bucket; i++) {
-                weights[i] = data[index++];
-            }
-            for (size_t i = 0; i < NEURONS; i++) {
-                biases[i] = data[index++];
-            }
+        for (size_t i = 0; i < NEURONS*INPUTS; i++) {
+            weights[i] = data[index++];
+        }
+        for (size_t i = 0; i < NEURONS; i++) {
+            biases[i] = data[index++];
         }
     }
 

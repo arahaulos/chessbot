@@ -64,7 +64,7 @@ unmove_data board_state::make_move(chess_move m, uint64_t new_zhash) {
         nnue->push_acculumator();
         flags |= INCREMENT_NNUE;
 
-        if (p.get_type() == KING && nnue->weights->big_net) {
+        if (p.get_type() == KING) {
             int prev_bucket = get_king_bucket(p.get_player() == BLACK ? m.from.index ^ 56 : m.from.index);
             int new_bucket = get_king_bucket(p.get_player() == BLACK ? m.to.index ^ 56 : m.to.index);
             bool side_changed = (m.from.index & 0x4) != (m.to.index & 0x4);
@@ -277,42 +277,30 @@ void board_state::set_initial_state()
 }
 
 std::vector<square_index> board_state::get_legal_moves(square_index pos) const {
-    board_state copy_state = *this;
-
     chess_move buffer[256];
     int move_count = move_generator::generate_all_pseudo_legal_moves(*this, get_square(pos).get_player(), buffer);
 
     std::vector<square_index> moves;
     for (int i = 0; i < move_count; i++) {
         if (buffer[i].from == pos) {
-            unmove_data restore = copy_state.make_move(buffer[i]);
-
-            if (!copy_state.in_check(get_square(pos).get_player())) {
+            if (!causes_check(buffer[i], get_turn())) {
                 moves.push_back(buffer[i].to);
             }
-
-            copy_state.unmake_move(buffer[i], restore);
         }
     }
     return moves;
 }
 
 std::vector<square_index> board_state::get_capture_moves(square_index pos) const {
-    board_state copy_state = *this;
-
     chess_move buffer[256];
     int move_count = move_generator::generate_capture_moves(*this, get_square(pos).get_player(), buffer);
 
     std::vector<square_index> moves;
     for (int i = 0; i < move_count; i++) {
         if (buffer[i].from == pos) {
-            unmove_data restore = copy_state.make_move(buffer[i]);
-
-            if (!copy_state.in_check(get_square(pos).get_player())) {
+            if (!causes_check(buffer[i], get_turn())) {
                 moves.push_back(buffer[i].to);
             }
-
-            copy_state.unmake_move(buffer[i], restore);
         }
     }
     return moves;
@@ -320,21 +308,14 @@ std::vector<square_index> board_state::get_capture_moves(square_index pos) const
 
 std::vector<chess_move> board_state::get_all_legal_moves(player_type_t player) const
 {
-    board_state copy_state = *this;
-
-
     chess_move buffer[256];
     int move_count = move_generator::generate_all_pseudo_legal_moves(*this, player, buffer);
 
     std::vector<chess_move> moves;
     for (int i = 0; i < move_count; i++) {
-        unmove_data restore = copy_state.make_move(buffer[i]);
-
-        if (!copy_state.in_check(player)) {
+        if (!causes_check(buffer[i], get_turn())) {
             moves.push_back(buffer[i]);
         }
-
-        copy_state.unmake_move(buffer[i], restore);
     }
     return moves;
 }
@@ -343,19 +324,13 @@ int board_state::count_legal_moves(player_type_t player) const
 {
     int legal_moves = 0;
 
-    board_state copy_state = *this;
-
     chess_move buffer[256];
     int move_count = move_generator::generate_all_pseudo_legal_moves(*this, player, buffer);
 
     for (int i = 0; i < move_count; i++) {
-        unmove_data restore = copy_state.make_move(buffer[i]);
-
-        if (!copy_state.in_check(player)) {
+        if (!causes_check(buffer[i], get_turn())) {
             legal_moves += 1;
         }
-
-        copy_state.unmake_move(buffer[i], restore);
     }
     return legal_moves;
 }

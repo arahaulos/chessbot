@@ -47,29 +47,9 @@ struct training_perspective_weights
         }
     }
 
-    void load(std::istream &stream, bool big_net) {
-        if (big_net) {
-            stream.read((char*)weights, (NEURONS*INPUTS)*sizeof(float));
-            stream.read((char*)biases, NEURONS*sizeof(float));
-        } else {
-            zero();
-
-            float *small_net_weights = new float[NEURONS*inputs_per_bucket];
-            stream.read((char*)small_net_weights, (NEURONS*inputs_per_bucket)*sizeof(float));
-            stream.read((char*)biases, NEURONS*sizeof(float));
-
-
-            for (int i = 0; i < NEURONS; i++) {
-                for (size_t j = 0; j < inputs_per_bucket; j++) {
-                    float w = small_net_weights[i*inputs_per_bucket + j];
-
-                    weights[i*INPUTS + j + num_of_king_buckets*inputs_per_bucket] = w;
-
-                }
-            }
-
-            delete [] small_net_weights;
-        }
+    void load(std::istream &stream) {
+        stream.read((char*)weights, (NEURONS*INPUTS)*sizeof(float));
+        stream.read((char*)biases, NEURONS*sizeof(float));
     }
 
     void copy_from(const training_perspective_weights<INPUTS, NEURONS> &other) {

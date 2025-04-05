@@ -9,6 +9,8 @@ constexpr size_t factorizer_inputs = inputs_per_bucket;
 
 constexpr size_t num_perspective_neurons = 512;
 
+constexpr size_t output_buckets = 8;
+
 constexpr int output_quantization_fractions = 1024;
 constexpr float output_quantization_clamp_max = 30000.0f/output_quantization_fractions;
 constexpr float output_quantization_clamp_min = -output_quantization_clamp_max;

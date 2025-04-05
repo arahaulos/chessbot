@@ -109,11 +109,13 @@ int application::test_incremental_updates()
             }
         }
 
+
+
         uint64_t zhash0 = game->get_state().zhash;
         uint64_t zhash1 = hashgen.get_hash(game->get_state(), game->get_state().get_turn());
 
         int16_t eval0 = net.evaluate(game->get_state());
-        int16_t eval1 = game->get_state().nnue->evaluate(game->get_state().get_turn());
+        int16_t eval1 = game->get_state().nnue->evaluate(game->get_state().get_turn(), encode_output_bucket(game->get_state().get_non_pawn_pieces_bb()));
         if (eval0 != eval1) {
             std::cout << "Evaluation failed!!! " << eval0 << " != " << eval1 << std::endl;
             failed = true;

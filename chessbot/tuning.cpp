@@ -120,6 +120,7 @@ void selfplay_worker::play(std::atomic<int> &games, int d, int n, bool random, s
         std::vector<position_evaluation> game_positions;
 
         game_win_type_t win_status = NO_WIN;
+        game_win_type_t mate_found_win = NO_WIN;
 
         int random_moves = (random ? 6 + (std::rand() % 8) : 0);
 
@@ -147,6 +148,15 @@ void selfplay_worker::play(std::atomic<int> &games, int d, int n, bool random, s
                 score = bot->get_evaluation();
                 depth = bot->get_depth();
 
+                if (is_mate_score(score) && mate_found_win == NO_WIN) {
+                    if ((game.get_state().get_turn() == BLACK && score < 0) ||
+                        (game.get_state().get_turn() == WHITE && score > 0)) {
+                        mate_found_win = WHITE_WIN;
+                    } else {
+                        mate_found_win = BLACK_WIN;
+                    }
+                }
+
                 if (depth > 1 && !is_mate_score(score)) {
                     game_positions.push_back(position_evaluation(game.get_state(), score, mov));
                 }
@@ -160,15 +170,16 @@ void selfplay_worker::play(std::atomic<int> &games, int d, int n, bool random, s
                 total_depth += depth;
 
                 win_status = game.make_move(mov);
+
+                if (mate_found_win != NO_WIN && win_status == NO_WIN) {
+                    win_status = mate_found_win;
+                }
             }
             moves++;
 
             if (moves > 512) {
                 win_status = DRAW;
             }
-
-            //std::cout << "Making move!!" << std::endl;
-
             if (win_status != NO_WIN) {
                 //std::cout << "Worker " << worker_id << "  Game number: " << games << "  Result: " << win_type_to_str(win_status) << std::endl;
                 break;
@@ -764,7 +775,7 @@ struct tuner_worker
             int value = local_params.data[param];
             int range = max_value - min_value;
 
-            int delta = std::max(3, range/16);
+            int delta = std::max(5, range/16);
 
             float smaller_value = std::clamp(value - delta, min_value, max_value);
             float bigger_value = std::clamp(value + delta, min_value, max_value);

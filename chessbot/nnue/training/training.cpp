@@ -88,12 +88,12 @@ void rmsprop(training_weights &weights, training_weights &grad, training_weights
 
 void back_propagate(training_network &net, training_weights &grad, float loss_delta, player_type_t stm)
 {
-    net.output_layer.grads[0] = loss_delta;
+    net.output_layer.grads[net.output_bucket] = loss_delta;
 
     if (stm == WHITE) {
-        net.output_layer.back_propagate(&grad.output_weights, net.white_side.grads, net.black_side.grads, net.white_side.neurons, net.black_side.neurons);
+        net.output_layer.back_propagate(net.output_bucket, &grad.output_weights, net.white_side.grads, net.black_side.grads, net.white_side.neurons, net.black_side.neurons);
     } else {
-        net.output_layer.back_propagate(&grad.output_weights, net.black_side.grads, net.white_side.grads, net.black_side.neurons, net.white_side.neurons);
+        net.output_layer.back_propagate(net.output_bucket, &grad.output_weights, net.black_side.grads, net.white_side.grads, net.black_side.neurons, net.white_side.neurons);
     }
 
     net.white_side.back_propagate(&grad.perspective_weights);
@@ -480,7 +480,7 @@ void training_loop(std::string net_file, std::string qnet_file, std::shared_ptr<
 
     float learning_rate = 0.0001f;
     float beta1 = 0.9f;
-    float beta2 = 0.999f;
+    float beta2 = 0.995f;
     int batch_size = 16000*thread_pool.get_pool_size();
     int epoch_size = 100000000;
     float min_lambda = 0.25f;

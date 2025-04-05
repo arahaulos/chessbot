@@ -12,13 +12,13 @@ struct move_generator
 
             *buffer = m;
             buffer->to.index = target_index;
-            buffer->extra_info |= chess_move::encode_captured_piece_info(state.get_square(target_index));
+            buffer->encoded_pieces |= chess_move::encode_captured_piece(state.get_square(target_index));
             buffer++;
         }
         return buffer;
     }
 
-    static uint8_t encode_move_extra_info(const board_state &state, chess_move mov)
+    static uint8_t encode_move_pieces(const board_state &state, chess_move mov)
     {
         piece moving_piece = state.get_square(mov.from);
         piece captured_piece = state.get_square(mov.to);
@@ -27,7 +27,7 @@ struct move_generator
             captured_piece = piece(next_turn(moving_piece.get_player()), PAWN);
         }
 
-        return chess_move::encode_captured_piece_info(captured_piece) | chess_move::encode_moving_piece_info(moving_piece);
+        return chess_move::encode_captured_piece(captured_piece) | chess_move::encode_moving_piece(moving_piece);
     }
 
 
@@ -60,7 +60,7 @@ struct move_generator
     {
         chess_move m;
         m.promotion = EMPTY;
-        m.extra_info = chess_move::encode_moving_piece_info(piece((color ? BLACK : WHITE), PAWN));
+        m.encoded_pieces = chess_move::encode_moving_piece(piece((color ? BLACK : WHITE), PAWN));
 
         bitboard iterate_pieces = state.bitboards[PAWN][color];
         while (iterate_pieces) {
@@ -80,16 +80,16 @@ struct move_generator
                 if (m.to.get_y() == 0 || m.to.get_y() == 7) {
                     for (int i = QUEEN; i >= KNIGHT; i--) {
                         *buffer = m;
-                        buffer->extra_info |= chess_move::encode_captured_piece_info(state.get_square(target_index));
+                        buffer->encoded_pieces |= chess_move::encode_captured_piece(state.get_square(target_index));
                         buffer->promotion = static_cast<piece_type_t>(i);
                         buffer++;
                     }
                 } else {
                     *buffer = m;
-                    buffer->extra_info |= chess_move::encode_captured_piece_info(state.get_square(target_index));
+                    buffer->encoded_pieces |= chess_move::encode_captured_piece(state.get_square(target_index));
 
                     if (target_index == state.en_passant_square.get_index() && (state.flags & EN_PASSANT_AVAILABLE) != 0) {
-                        buffer->extra_info |= chess_move::encode_captured_piece_info(piece((color ? WHITE : BLACK), PAWN));
+                        buffer->encoded_pieces |= chess_move::encode_captured_piece(piece((color ? WHITE : BLACK), PAWN));
                     }
 
                     buffer++;
@@ -103,7 +103,7 @@ struct move_generator
     {
         chess_move m;
         m.promotion = EMPTY;
-        m.extra_info = chess_move::encode_moving_piece_info(piece((color ? BLACK : WHITE), PAWN));
+        m.encoded_pieces = chess_move::encode_moving_piece(piece((color ? BLACK : WHITE), PAWN));
 
         bitboard iterate_pieces = state.bitboards[PAWN][color];
         while (iterate_pieces) {
@@ -141,7 +141,7 @@ struct move_generator
     {
         chess_move m;
         m.promotion = EMPTY;
-        m.extra_info = chess_move::encode_moving_piece_info(piece((color ? BLACK : WHITE), KNIGHT));
+        m.encoded_pieces = chess_move::encode_moving_piece(piece((color ? BLACK : WHITE), KNIGHT));
 
         bitboard iterate_pieces = state.bitboards[KNIGHT][color];
         while (iterate_pieces) {
@@ -162,7 +162,7 @@ struct move_generator
     {
         chess_move m;
         m.promotion = EMPTY;
-        m.extra_info = chess_move::encode_moving_piece_info(piece((color ? BLACK : WHITE), BISHOP));
+        m.encoded_pieces = chess_move::encode_moving_piece(piece((color ? BLACK : WHITE), BISHOP));
 
         bitboard iterate_pieces = state.bitboards[BISHOP][color];
         while (iterate_pieces) {
@@ -183,7 +183,7 @@ struct move_generator
     {
         chess_move m;
         m.promotion = EMPTY;
-        m.extra_info = chess_move::encode_moving_piece_info(piece((color ? BLACK : WHITE), ROOK));
+        m.encoded_pieces = chess_move::encode_moving_piece(piece((color ? BLACK : WHITE), ROOK));
 
         bitboard iterate_pieces = state.bitboards[ROOK][color];
         while (iterate_pieces) {
@@ -204,7 +204,7 @@ struct move_generator
     {
         chess_move m;
         m.promotion = EMPTY;
-        m.extra_info = chess_move::encode_moving_piece_info(piece((color ? BLACK : WHITE), QUEEN));
+        m.encoded_pieces = chess_move::encode_moving_piece(piece((color ? BLACK : WHITE), QUEEN));
 
         bitboard iterate_pieces = state.bitboards[QUEEN][color];
         while (iterate_pieces) {
@@ -225,7 +225,7 @@ struct move_generator
     {
         chess_move m;
         m.promotion = EMPTY;
-        m.extra_info = chess_move::encode_moving_piece_info(piece((color ? BLACK : WHITE), KING));
+        m.encoded_pieces = chess_move::encode_moving_piece(piece((color ? BLACK : WHITE), KING));
 
         bitboard iterate_pieces = state.bitboards[KING][color];
         while (iterate_pieces) {
@@ -400,7 +400,7 @@ struct move_generator
             bool is_capture = state.get_square(movelist[i].to).get_type() != EMPTY;
 
             movelist[i].promotion = EMPTY;
-            movelist[i].extra_info = chess_move::encode_moving_piece_info(state.get_square(movelist[i].from));
+            movelist[i].encoded_pieces = chess_move::encode_moving_piece(state.get_square(movelist[i].from));
 
             if (!is_move_valid(state, movelist[i]) || is_en_passant || is_promotion || is_capture) {
                 std::swap(movelist[i], movelist[c-1]);

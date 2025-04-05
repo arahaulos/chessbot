@@ -4,11 +4,12 @@ Estimated strength 3450 Elo (Blitz)
 
 ## efficiently updatable neural network (NNUE) evaluation
 - 16 king buckets (total 2x16x768 inputs)
-- (16x768 -> 512)x2 -> 1 architecture
+- 8 output buckets (determined by number of non pawn pieces)
+- (16x768 -> 512)x2 -> 8 architecture
 - clipped relu activation function
 - quantized 16-bit fixed point arithmetics
 - vectorized for AVX2
-- trained on selfplay positions (~4 billion positions)
+- trained on selfplay positions (~4.5 billion positions)
 - CPU trainer (backpropagation + ADAM optimizer)
 
 ## principal variation search

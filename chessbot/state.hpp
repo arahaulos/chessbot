@@ -140,35 +140,35 @@ struct chess_move
     square_index to;
 
     piece_type_t promotion;
-    uint8_t extra_info;
+    uint8_t encoded_pieces;
 
     static chess_move null_move() {
         chess_move nm;
         nm.promotion = EMPTY;
         nm.to.index = 0;
         nm.from.index = 0;
-        nm.extra_info = 0;
+        nm.encoded_pieces = 0;
         return nm;
     }
 
-    static uint8_t encode_moving_piece_info(piece p) {
+    static uint8_t encode_moving_piece(piece p) {
         return ((uint8_t)p.d << 4);
     }
 
-    static uint8_t encode_captured_piece_info(piece p) {
+    static uint8_t encode_captured_piece(piece p) {
         return ((uint8_t)p.d & 0xF);
     }
 
     piece get_captured_piece() const {
-        return piece((piece_player_type_t)(extra_info & 0xF));
+        return piece((piece_player_type_t)(encoded_pieces & 0xF));
     }
 
     piece get_moving_piece() const {
-        return piece((piece_player_type_t)((extra_info >> 4) & 0xF));
+        return piece((piece_player_type_t)((encoded_pieces >> 4) & 0xF));
     }
 
     bool is_capture() const {
-        return ((extra_info & 0xF) != 0);
+        return ((encoded_pieces & 0xF) != 0);
     }
 
     inline bool operator == (const chess_move &other) const {
@@ -476,6 +476,10 @@ public:
         return count_non_pawn_pieces(BLACK) + count_non_pawn_pieces(WHITE);
     }
 
+    bitboard get_non_pawn_pieces_bb() const {
+        return (pieces_by_color[0] | pieces_by_color[1]) & ~(bitboards[PAWN][0] | bitboards[PAWN][1] | bitboards[KING][0] | bitboards[KING][1]);
+    }
+
     bool is_insufficient_material() const {
         int num_of_pieces = pop_count(pieces_by_color[0] | pieces_by_color[1]);
 
@@ -618,12 +622,8 @@ public:
     square_index en_passant_square;
     square_index en_passant_target_square;
     uint16_t half_move_clock;
+
 private:
-
-
-    uint64_t hash_stack[1024];
-    int hash_stack_top;
-
     void push_hash_stack(uint64_t zhash, bool irreversible)
     {
         if (hash_stack_top >= 1022) {
@@ -654,6 +654,8 @@ private:
         }
     }
 
+    uint64_t hash_stack[1024];
+    int hash_stack_top;
 };
 
 

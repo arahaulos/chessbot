@@ -102,7 +102,7 @@ inline float activation_func_out(float x)
 }
 
 
-template <int INPUTS, int NEURONS>
+template <int INPUTS, int NEURONS, bool IS_OUTPUT_LAYER>
 struct training_layer_weights
 {
     training_layer_weights() {
@@ -135,7 +135,7 @@ struct training_layer_weights
         int fracs = layer_quantization_fractions;
         float quant_correction_frac = 1.0f;
 
-        if (INPUTS == 2*num_perspective_neurons && NEURONS == 1) {
+        if (INPUTS == 2*num_perspective_neurons && IS_OUTPUT_LAYER) {
             clamp_min = output_quantization_clamp_min;
             clamp_max = output_quantization_clamp_max;
             fracs = output_quantization_fractions;
@@ -144,7 +144,7 @@ struct training_layer_weights
 
         } else if (INPUTS == 2*num_perspective_neurons) {
             quant_correction_frac = (double)layer_quantization_fractions / (double)halfkp_quantization_fractions;
-        } else if (NEURONS == 1) {
+        } else if (IS_OUTPUT_LAYER) {
             clamp_min = output_quantization_clamp_min;
             clamp_max = output_quantization_clamp_max;
             fracs = output_quantization_fractions;
@@ -168,7 +168,7 @@ struct training_layer_weights
         }
     }
 
-    void copy_from(const training_layer_weights<INPUTS, NEURONS> &other) {
+    void copy_from(const training_layer_weights<INPUTS, NEURONS, IS_OUTPUT_LAYER> &other) {
         for (int i = 0; i < NEURONS; i++) {
             biases[i] = other.biases[i];
         }
@@ -212,7 +212,7 @@ struct training_layer_weights
         return sum_sqr;
     }
 
-    void squared(const training_layer_weights<INPUTS, NEURONS> &other) {
+    void squared(const training_layer_weights<INPUTS, NEURONS, IS_OUTPUT_LAYER> &other) {
         mult_vectorized<NEURONS*INPUTS>(weights, other.weights, other.weights);
         mult_vectorized<NEURONS>(biases, other.biases, other.biases);
     }
@@ -225,16 +225,16 @@ struct training_layer_weights
         return NEURONS*INPUTS;
     }
 
-    void add(const training_layer_weights<INPUTS, NEURONS> &other) {
+    void add(const training_layer_weights<INPUTS, NEURONS, IS_OUTPUT_LAYER> &other) {
         add_vectorized<NEURONS>(biases, biases, other.biases);
         add_vectorized<NEURONS*INPUTS>(weights, weights, other.weights);
     }
 
-    void gradient_descent(training_layer_weights<INPUTS, NEURONS> *grad, float learning_rate)
+    void gradient_descent(training_layer_weights<INPUTS, NEURONS, IS_OUTPUT_LAYER> *grad, float learning_rate)
     {
         float clamp_min = layer_quantization_clamp_min;
         float clamp_max = layer_quantization_clamp_max;
-        if (NEURONS == 1) {
+        if (IS_OUTPUT_LAYER) {
             clamp_min = output_quantization_clamp_min;
             clamp_max = output_quantization_clamp_max;
         }
@@ -271,11 +271,11 @@ struct training_layer_weights
     }
 
 
-    void rmsprop(training_layer_weights<INPUTS, NEURONS> *grad, training_layer_weights<INPUTS, NEURONS> *pg, float learning_rate)
+    void rmsprop(training_layer_weights<INPUTS, NEURONS, IS_OUTPUT_LAYER> *grad, training_layer_weights<INPUTS, NEURONS, IS_OUTPUT_LAYER> *pg, float learning_rate)
     {
         float clamp_min = layer_quantization_clamp_min;
         float clamp_max = layer_quantization_clamp_max;
-        if (NEURONS == 1) {
+        if (IS_OUTPUT_LAYER) {
             clamp_min = output_quantization_clamp_min;
             clamp_max = output_quantization_clamp_max;
         }
@@ -333,10 +333,10 @@ struct training_layer_weights
 
 
 
-template <int IN, int OUT>
+template <int IN, int OUT, bool IS_OUTPUT_LAYER>
 struct training_layer
 {
-    training_layer(training_layer_weights<IN, OUT> *w) {
+    training_layer(training_layer_weights<IN, OUT, IS_OUTPUT_LAYER> *w) {
         weights = w;
         neurons_buffer = new float[OUT + 64];
         acculumator_buffer = new float[OUT + 64];
@@ -360,89 +360,97 @@ struct training_layer
         }
     }
 
+
+    void update(int neuron, float *prev_layer) {
+        __m256 n = _mm256_set1_ps(0.0f);
+
+        for (int j = 0; j < IN; j += 8) {
+            __m256 l0 = _mm256_load_ps(&prev_layer[j]);
+            __m256 w = _mm256_load_ps(&weights->weights[neuron*IN + j]);
+
+            n = _mm256_fmadd_ps(l0, w, n);
+        }
+
+        __m128 a = _mm256_extractf128_ps(n, 0);
+        __m128 b = _mm256_extractf128_ps(n, 1);
+
+        __m128 h = _mm_hadd_ps(a, b);
+
+
+        union {
+            int i[4];
+            float f[4];
+        } data;
+
+        data.i[0] = _mm_extract_ps(h, 0);
+        data.i[1] = _mm_extract_ps(h, 1);
+        data.i[2] = _mm_extract_ps(h, 2);
+        data.i[3] = _mm_extract_ps(h, 3);
+
+        acculumator[neuron] = data.f[0] + data.f[1] + data.f[2] + data.f[3] + weights->biases[neuron];
+
+        if (IS_OUTPUT_LAYER) {
+            neurons[neuron] = activation_func_out(acculumator[neuron]);
+        } else {
+            neurons[neuron] = activation_func(acculumator[neuron]);
+        }
+    }
+
+    void update(int neuron, float *prev_layer0, float *prev_layer1) {
+        __m256 n = _mm256_set1_ps(0.0f);
+
+        for (int j = 0; j < IN/2; j += 8) {
+            __m256 l0 = _mm256_load_ps(&prev_layer0[j]);
+            __m256 w = _mm256_load_ps(&weights->weights[neuron*IN + j]);
+
+            n = _mm256_fmadd_ps(l0, w, n);
+        }
+
+        for (int j = 0; j < IN/2; j += 8) {
+            __m256 l0 = _mm256_load_ps(&prev_layer1[j]);
+            __m256 w = _mm256_load_ps(&weights->weights[neuron*IN + j + (IN/2)]);
+
+            n = _mm256_fmadd_ps(l0, w, n);
+        }
+
+        __m128 a = _mm256_extractf128_ps(n, 0);
+        __m128 b = _mm256_extractf128_ps(n, 1);
+
+        __m128 h = _mm_hadd_ps(a, b);
+
+
+        union {
+            int i[4];
+            float f[4];
+        } data;
+
+        data.i[0] = _mm_extract_ps(h, 0);
+        data.i[1] = _mm_extract_ps(h, 1);
+        data.i[2] = _mm_extract_ps(h, 2);
+        data.i[3] = _mm_extract_ps(h, 3);
+
+        acculumator[neuron] = data.f[0] + data.f[1] + data.f[2] + data.f[3] + weights->biases[neuron];
+
+        if (IS_OUTPUT_LAYER) {
+            neurons[neuron] = activation_func_out(acculumator[neuron]);
+        } else {
+            neurons[neuron] = activation_func(acculumator[neuron]);
+        }
+    }
+
     void update(float *prev_layer) {
         for (int i = 0; i < OUT; i++) {
-            __m256 n = _mm256_set1_ps(0.0f);
-
-            for (int j = 0; j < IN; j += 8) {
-                __m256 l0 = _mm256_load_ps(&prev_layer[j]);
-                __m256 w = _mm256_load_ps(&weights->weights[i*IN + j]);
-
-                n = _mm256_fmadd_ps(l0, w, n);
-            }
-
-            __m128 a = _mm256_extractf128_ps(n, 0);
-            __m128 b = _mm256_extractf128_ps(n, 1);
-
-            __m128 h = _mm_hadd_ps(a, b);
-
-
-            union {
-                int i[4];
-                float f[4];
-            } data;
-
-            data.i[0] = _mm_extract_ps(h, 0);
-            data.i[1] = _mm_extract_ps(h, 1);
-            data.i[2] = _mm_extract_ps(h, 2);
-            data.i[3] = _mm_extract_ps(h, 3);
-
-            acculumator[i] = data.f[0] + data.f[1] + data.f[2] + data.f[3] + weights->biases[i];
-
-            if (OUT == 1) {
-                neurons[i] = activation_func_out(acculumator[i]);
-            } else {
-                neurons[i] = activation_func(acculumator[i]);
-            }
+            update(i, prev_layer);
         }
     }
 
     void update(float *prev_layer0, float *prev_layer1) {
         for (int i = 0; i < OUT; i++) {
-            __m256 n = _mm256_set1_ps(0.0f);
-
-            for (int j = 0; j < IN/2; j += 8) {
-                __m256 l0 = _mm256_load_ps(&prev_layer0[j]);
-                __m256 w = _mm256_load_ps(&weights->weights[i*IN + j]);
-
-                n = _mm256_fmadd_ps(l0, w, n);
-            }
-
-            for (int j = 0; j < IN/2; j += 8) {
-                __m256 l0 = _mm256_load_ps(&prev_layer1[j]);
-                __m256 w = _mm256_load_ps(&weights->weights[i*IN + j + (IN/2)]);
-
-                n = _mm256_fmadd_ps(l0, w, n);
-            }
-
-            __m128 a = _mm256_extractf128_ps(n, 0);
-            __m128 b = _mm256_extractf128_ps(n, 1);
-
-            __m128 h = _mm_hadd_ps(a, b);
-
-
-            union {
-                int i[4];
-                float f[4];
-            } data;
-
-            data.i[0] = _mm_extract_ps(h, 0);
-            data.i[1] = _mm_extract_ps(h, 1);
-            data.i[2] = _mm_extract_ps(h, 2);
-            data.i[3] = _mm_extract_ps(h, 3);
-
-            acculumator[i] = data.f[0] + data.f[1] + data.f[2] + data.f[3] + weights->biases[i];
-
-            if (OUT == 1) {
-                neurons[i] = activation_func_out(acculumator[i]);
-            } else {
-                neurons[i] = activation_func(acculumator[i]);
-            }
+            update(i, prev_layer0, prev_layer1);
         }
     }
 
-
-    void back_propagate(training_layer_weights<IN,OUT> *gradients, float *prev_layer_grads0, float *prev_layer_grads1, float *prev_layer_activations0, float *prev_layer_activations1) {
+    void back_propagate(training_layer_weights<IN,OUT,IS_OUTPUT_LAYER> *gradients, float *prev_layer_grads0, float *prev_layer_grads1, float *prev_layer_activations0, float *prev_layer_activations1) {
 
         for (int i = 0; i < IN/2; i++) {
             prev_layer_grads0[i] = 0;
@@ -453,7 +461,7 @@ struct training_layer
             //float a = neurons[i]; //Activvation
             float x = acculumator[i]; //Neurons input
             float dc = grads[i]; //cost diff
-            float da = ((OUT == 1) ? activation_diff_out(x) : activation_diff(x)); //activation diff
+            float da = (IS_OUTPUT_LAYER ? activation_diff_out(x) : activation_diff(x)); //activation diff
 
 
             __m256 dcda = _mm256_set1_ps(dc*da);
@@ -464,11 +472,6 @@ struct training_layer
                 __m256 l0_grads = _mm256_load_ps(&prev_layer_grads0[j]);
                 __m256 g = _mm256_load_ps(&gradients->weights[i*IN + j]);
 
-                /*__m256 grad = _mm256_mul_ps(dcda, l0);
-                __m256 grad_l = _mm256_mul_ps(dcda, w);
-
-                __m256 tmp = _mm256_add_ps(l0_grads, grad_l);
-                __m256 tmp2 = _mm256_add_ps(g, grad);*/
 
                 __m256 tmp = _mm256_fmadd_ps(dcda, w, l0_grads);
                 __m256 tmp2 = _mm256_fmadd_ps(dcda, l0, g);
@@ -482,11 +485,6 @@ struct training_layer
                 __m256 l0_grads = _mm256_load_ps(&prev_layer_grads1[j]);
                 __m256 g = _mm256_load_ps(&gradients->weights[i*IN + j + IN/2]);
 
-                /*__m256 grad = _mm256_mul_ps(dcda, l0);
-                __m256 grad_l = _mm256_mul_ps(dcda, w);
-
-                __m256 tmp = _mm256_add_ps(l0_grads, grad_l);
-                __m256 tmp2 = _mm256_add_ps(g, grad);*/
 
                 __m256 tmp = _mm256_fmadd_ps(dcda, w, l0_grads);
                 __m256 tmp2 = _mm256_fmadd_ps(dcda, l0, g);
@@ -504,7 +502,56 @@ struct training_layer
         }
     }
 
-    void back_propagate(training_layer_weights<IN,OUT> *gradients, float *prev_layer_grads, float *prev_layer_activations) {
+
+
+
+    void back_propagate(int neuron, training_layer_weights<IN,OUT,IS_OUTPUT_LAYER> *gradients, float *prev_layer_grads0, float *prev_layer_grads1, float *prev_layer_activations0, float *prev_layer_activations1) {
+
+        for (int i = 0; i < IN/2; i++) {
+            prev_layer_grads0[i] = 0;
+            prev_layer_grads1[i] = 0;
+        }
+        //float a = neurons[i]; //Activvation
+        float x = acculumator[neuron]; //Neurons input
+        float dc = grads[neuron]; //cost diff
+        float da = (IS_OUTPUT_LAYER ? activation_diff_out(x) : activation_diff(x)); //activation diff
+
+        __m256 dcda = _mm256_set1_ps(dc*da);
+
+        for (int j = 0; j < IN/2; j += 8) {
+            __m256 l0 = _mm256_load_ps(&prev_layer_activations0[j]);
+            __m256 w = _mm256_load_ps(&weights->weights[neuron*IN + j]);
+            __m256 l0_grads = _mm256_load_ps(&prev_layer_grads0[j]);
+            __m256 g = _mm256_load_ps(&gradients->weights[neuron*IN + j]);
+
+
+            __m256 tmp = _mm256_fmadd_ps(dcda, w, l0_grads);
+            __m256 tmp2 = _mm256_fmadd_ps(dcda, l0, g);
+
+            _mm256_store_ps(&gradients->weights[neuron*IN + j], tmp2);
+            _mm256_store_ps(&prev_layer_grads0[j], tmp);
+        }
+        for (int j = 0; j < IN/2; j += 8) {
+            __m256 l0 = _mm256_load_ps(&prev_layer_activations1[j]);
+            __m256 w = _mm256_load_ps(&weights->weights[neuron*IN + j + IN/2]);
+            __m256 l0_grads = _mm256_load_ps(&prev_layer_grads1[j]);
+            __m256 g = _mm256_load_ps(&gradients->weights[neuron*IN + j + IN/2]);
+
+
+            __m256 tmp = _mm256_fmadd_ps(dcda, w, l0_grads);
+            __m256 tmp2 = _mm256_fmadd_ps(dcda, l0, g);
+
+            _mm256_store_ps(&gradients->weights[neuron*IN + j + IN/2], tmp2);
+            _mm256_store_ps(&prev_layer_grads1[j], tmp);
+        }
+
+        gradients->biases[neuron] = dc*da;
+    }
+
+
+
+
+    void back_propagate(training_layer_weights<IN,OUT,IS_OUTPUT_LAYER> *gradients, float *prev_layer_grads, float *prev_layer_activations) {
 
         for (int i = 0; i < IN; i++) {
             prev_layer_grads[i] = 0;
@@ -514,18 +561,7 @@ struct training_layer
             //float a = neurons[i]; //Activvation
             float x = acculumator[i]; //Neurons input
             float dc = grads[i]; //cost diff
-            float da = ((OUT == 1) ? activation_diff_out(x) : activation_diff(x)); //activation diff
-
-            /*for (int j = 0; j < IN; j++) {
-                float l0 = prev_layer_activations[j];
-
-                float w = weights->weights[i*IN + j];
-                float grad = dc*da*l0;
-                float grad_l = dc*da*w;
-
-                gradients->weights[i*IN + j] = grad;
-                prev_layer_grads[j] += grad_l;
-            }*/
+            float da = (IS_OUTPUT_LAYER ? activation_diff_out(x) : activation_diff(x)); //activation diff
 
             __m256 dcda = _mm256_set1_ps(dc*da);
 
@@ -534,12 +570,6 @@ struct training_layer
                 __m256 w = _mm256_load_ps(&weights->weights[i*IN + j]);
                 __m256 l0_grads = _mm256_load_ps(&prev_layer_grads[j]);
                 __m256 g = _mm256_load_ps(&gradients->weights[i*IN + j]);
-
-                /*__m256 grad = _mm256_mul_ps(dcda, l0);
-                __m256 grad_l = _mm256_mul_ps(dcda, w);
-
-                __m256 tmp = _mm256_add_ps(l0_grads, grad_l);
-                __m256 tmp2 = _mm256_add_ps(g, grad);*/
 
                 __m256 tmp = _mm256_fmadd_ps(dcda, w, l0_grads);
                 __m256 tmp2 = _mm256_fmadd_ps(dcda, l0, g);
@@ -556,6 +586,38 @@ struct training_layer
         }
     }
 
+
+
+    void back_propagate(int neuron, training_layer_weights<IN,OUT,IS_OUTPUT_LAYER> *gradients, float *prev_layer_grads, float *prev_layer_activations) {
+
+        for (int i = 0; i < IN; i++) {
+            prev_layer_grads[i] = 0;
+        }
+
+        //float a = neurons[i]; //Activvation
+        float x = acculumator[neuron]; //Neurons input
+        float dc = grads[neuron]; //cost diff
+        float da = (IS_OUTPUT_LAYER ? activation_diff_out(x) : activation_diff(x)); //activation diff
+
+        __m256 dcda = _mm256_set1_ps(dc*da);
+
+        for (int j = 0; j < IN; j += 8) {
+            __m256 l0 = _mm256_load_ps(&prev_layer_activations[j]);
+            __m256 w = _mm256_load_ps(&weights->weights[neuron*IN + j]);
+            __m256 l0_grads = _mm256_load_ps(&prev_layer_grads[j]);
+            __m256 g = _mm256_load_ps(&gradients->weights[neuron*IN + j]);
+
+            __m256 tmp = _mm256_fmadd_ps(dcda, w, l0_grads);
+            __m256 tmp2 = _mm256_fmadd_ps(dcda, l0, g);
+
+            _mm256_store_ps(&prev_layer_grads[j], tmp);
+            _mm256_store_ps(&gradients->weights[neuron*IN + j], tmp2);
+        }
+
+        gradients->biases[neuron] = dc*da;
+    }
+
+
     float *neurons;
     float *acculumator;
 
@@ -566,7 +628,7 @@ struct training_layer
     float *grads_buffer;
 
 
-    training_layer_weights<IN, OUT> *weights;
+    training_layer_weights<IN, OUT,IS_OUTPUT_LAYER> *weights;
 };
 
 

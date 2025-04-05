@@ -1,5 +1,7 @@
 #pragma once
 
+#include "state.hpp"
+
 constexpr int32_t correction_history_grain = 512;
 constexpr int32_t correction_pawn_table_size = 16384;
 constexpr int32_t correction_material_table_size = 2048;
@@ -139,11 +141,13 @@ struct history_heurestic_table
 
     int get_killers(chess_move *buffer, int ply)
     {
-        chess_move previous_move = move_stack[ply-1];
-
         int index = 0;
 
-        buffer[index++] = counter_moves[previous_move.get_moving_piece().d][previous_move.to.index];
+        chess_move previous_move = move_stack[ply-1];
+
+        if (previous_move != chess_move::null_move()) {
+            buffer[index++] = counter_moves[previous_move.get_moving_piece().d][previous_move.to.index];
+        }
 
         for (int i = 0; i < KILLER_MOVE_SLOTS; i++) {
             buffer[index++] = killer_moves[ply][i];

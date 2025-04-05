@@ -79,11 +79,22 @@ inline int encode_factorizer_input(int type, int color, int sq_index, int king_s
     return index + king_bucket*12*64;
 }
 
+inline int encode_output_bucket(uint64_t non_pawn_pieces)
+{
+    int b = pop_count(non_pawn_pieces) / 2;
+    if (b < 0) {
+        b = 0;
+    } else if (b >= output_buckets) {
+        b = output_buckets-1;
+    }
+    return b;
+}
+
 
 struct training_weights
 {
     training_perspective_weights<num_perspective_inputs + factorizer_inputs, num_perspective_neurons> perspective_weights;
-    training_layer_weights<num_perspective_neurons*2, 1> output_weights;
+    training_layer_weights<num_perspective_neurons*2, output_buckets, true> output_weights;
 
 
     void copy_from(const training_weights &other) {
@@ -145,8 +156,10 @@ struct training_network
 
     training_perspective<num_perspective_inputs + factorizer_inputs, num_perspective_neurons> black_side;
     training_perspective<num_perspective_inputs + factorizer_inputs, num_perspective_neurons> white_side;
-    training_layer<num_perspective_neurons*2, 1> output_layer;
+    training_layer<num_perspective_neurons*2, output_buckets, true> output_layer;
 
     std::shared_ptr<training_weights> weights;
+
+    int output_bucket;
 };
 

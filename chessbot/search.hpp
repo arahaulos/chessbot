@@ -268,7 +268,15 @@ public:
     ~alphabeta_search();
     alphabeta_search(const alphabeta_search &other);
 
-    void load_nnue_net(std::string path);
+    void load_nnue_net(std::string path)
+    {
+        shared_nnue_weights->load(path);
+    }
+
+    void load_nnue_net_sb(std::string path)
+    {
+        shared_nnue_weights->load_sb(path);
+    }
 
     void set_shared_weights(std::shared_ptr<nnue_weights> weights) {
         shared_nnue_weights = weights;

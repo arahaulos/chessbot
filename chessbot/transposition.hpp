@@ -151,7 +151,7 @@ struct tt_entry_slot
 
         e = score_from_tt(e, ply);
 
-        bm.extra_info = move_generator::encode_move_extra_info(state, bm);
+        bm.encoded_pieces = move_generator::encode_move_pieces(state, bm);
     }
 };
 
