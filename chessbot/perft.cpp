@@ -166,7 +166,7 @@ uint64_t perft::debug_perft(board_state &state, int depth, int ply, search_conte
         total += c;
     }
 
-    sc.history.update(state, best_move, depth, ply, picker.picked_quiet_moves, picker.picked_quiet_count, picker.picked_captures, picker.picked_capture_count);
+    sc.history.update(best_move, depth, ply, picker.picked_quiet_moves, picker.picked_quiet_count, picker.picked_captures, picker.picked_capture_count);
 
     if (total < 32000) {
         test_perft_tt[state.zhash].write(state.zhash, best_move, depth, ALL_NODE, total, total, 0, cache_age);

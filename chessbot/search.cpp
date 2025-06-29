@@ -974,7 +974,7 @@ int32_t alphabeta_search::alphabeta(board_state &state, int32_t alpha, int32_t b
         }
         //Update move ordering heurestics. Move picker stores moves that were tried.
         if (node_type == CUT_NODE) {
-            sc.history.update(state, best_move, depth, ply, mpicker.picked_quiet_moves, mpicker.picked_quiet_count, mpicker.picked_captures, mpicker.picked_capture_count);
+            sc.history.update(best_move, depth, ply, mpicker.picked_quiet_moves, mpicker.picked_quiet_count, mpicker.picked_captures, mpicker.picked_capture_count);
         }
 
         //If we have tt move and all moves failed low,
