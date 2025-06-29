@@ -260,6 +260,7 @@ void alphabeta_search::iterative_search(int max_depth)
 
     std::chrono::high_resolution_clock::time_point t1 = std::chrono::high_resolution_clock::now();
 
+
     int depth = 2;
     while (depth <= max_depth) {
         all_threads_stats.reset();
@@ -286,6 +287,7 @@ void alphabeta_search::iterative_search(int max_depth)
             max_depth_reached = all_threads_stats.max_distance_to_root;
 
             total_nodes_searched = all_threads_stats.nodes;
+
             depth += 1;
 
 
@@ -462,6 +464,7 @@ void alphabeta_search::search_root(int32_t window_alpha, int32_t window_beta, in
 
         sc.moves[0] = root_move;
         sc.conthist[0] = sc.history.get_continuation_history_table(root_move);
+        sc.stats.nodes += 1;
 
         line.first(root_move);
 
@@ -586,7 +589,7 @@ int32_t alphabeta_search::alphabeta(board_state &state, int32_t alpha, int32_t b
     }
 
     if (depth <= 0 || ply >= MAX_DEPTH-2) {
-        return quisearch(state, alpha, beta, ply, sc.stats, is_pv);
+        return quisearch(state, alpha, beta, ply, sc, is_pv);
     }
 
     chess_move tt_move = chess_move::null_move();
@@ -624,8 +627,7 @@ int32_t alphabeta_search::alphabeta(board_state &state, int32_t alpha, int32_t b
 
     //If we have tt hit, we might be able to use tt score as more accurate evaluation
     if (tt_hit && tt_score != 0 && !is_mate_score(tt_score)) {
-        if (tt_node_type == PV_NODE ||
-            (tt_node_type == CUT_NODE && static_eval < tt_score) ||
+        if ((tt_node_type == CUT_NODE && static_eval < tt_score) ||
             (tt_node_type == ALL_NODE && static_eval > tt_score)) {
             eval = tt_score;
         }
@@ -724,7 +726,7 @@ int32_t alphabeta_search::alphabeta(board_state &state, int32_t alpha, int32_t b
 
     int32_t razoring_margin = sp.razoring_margin*depth;
     if (!is_pv && !in_check && depth < 5 && eval + razoring_margin < alpha) {
-        int score = quisearch(state, alpha, beta, ply, sc.stats, false);
+        int score = quisearch(state, alpha, beta, ply, sc, false);
         if (score < alpha) {
             return score;
         }
@@ -798,10 +800,12 @@ int32_t alphabeta_search::alphabeta(board_state &state, int32_t alpha, int32_t b
             int d = depth;
             int rd = std::clamp(depth - reductions, 1, d);
 
-            if ((mpicker.legal_moves >= (d*d+3)   && improving) ||
-                (mpicker.legal_moves >= (d*d+3)/2 && !improving)) {
+
+            if ((mpicker.legal_moves >= (d*d+6)   && improving) ||
+                (mpicker.legal_moves >= (d*d+6)/2 && !improving)) {
                 mpicker.skip_quiets(); //Late move pruning > 60 elo. Currently does not prune killers
             }
+
 
             bool prune = false;
             if (!is_capture) {
@@ -970,7 +974,7 @@ int32_t alphabeta_search::alphabeta(board_state &state, int32_t alpha, int32_t b
         }
         //Update move ordering heurestics. Move picker stores moves that were tried.
         if (node_type == CUT_NODE) {
-            sc.history.update(best_move, depth, ply, mpicker.picked_quiet_moves, mpicker.picked_quiet_count, mpicker.picked_captures, mpicker.picked_capture_count);
+            sc.history.update(state, best_move, depth, ply, mpicker.picked_quiet_moves, mpicker.picked_quiet_count, mpicker.picked_captures, mpicker.picked_capture_count);
         }
 
         //If we have tt move and all moves failed low,
@@ -987,10 +991,10 @@ int32_t alphabeta_search::alphabeta(board_state &state, int32_t alpha, int32_t b
 
 
 
-int32_t alphabeta_search::quisearch(board_state &state, int32_t alpha, int32_t beta, int ply, search_statistics &stats, bool is_pv)
+int32_t alphabeta_search::quisearch(board_state &state, int32_t alpha, int32_t beta, int ply, search_context &sc, bool is_pv)
 {
     if (ply >= MAX_DEPTH) {
-        return static_evaluation(state, state.get_turn(), stats);
+        return static_evaluation(state, state.get_turn(), sc.stats);
     }
 
     bool in_check = state.in_check(state.get_turn());
@@ -1014,8 +1018,16 @@ int32_t alphabeta_search::quisearch(board_state &state, int32_t alpha, int32_t b
         }
     }
 
-    int32_t static_eval = (tt_hit ? tt_static_eval : static_evaluation(state, state.get_turn(), stats));
+    int32_t raw_eval = (tt_hit ? tt_static_eval : static_evaluation(state, state.get_turn(), sc.stats));
+    int32_t static_eval = raw_eval + sc.history.get_correction_history(state);
+    int32_t eval = static_eval;
 
+    if (tt_hit && tt_score != 0 && !is_mate_score(tt_score)) {
+        if ((tt_node_type == CUT_NODE && static_eval < tt_score) ||
+            (tt_node_type == ALL_NODE && static_eval > tt_score)) {
+            eval = tt_score;
+        }
+    }
 
     int32_t best_score = MIN_EVAL;
     int legal_moves = 0;
@@ -1026,11 +1038,11 @@ int32_t alphabeta_search::quisearch(board_state &state, int32_t alpha, int32_t b
         //Static evaluation works as lower bound of the score quiscence search can return when we are not in check
         //Based on assumption that there is quiet move, which doesn't make position worse
         //Assumption doesn't hold in many cases, but purpose of quiscence search is to make sure that position where evaluation happens is quiet (opponent have change to recapture)
-        if (static_eval >= beta) {
-            return static_eval;
+        if (eval >= beta) {
+            return eval;
         }
-        if (alpha < static_eval) {
-            alpha = static_eval;
+        if (alpha < eval) {
+            alpha = eval;
         }
 
         chess_move captures[80];
@@ -1038,14 +1050,14 @@ int32_t alphabeta_search::quisearch(board_state &state, int32_t alpha, int32_t b
         num_of_captures += move_generator::generate_promotion_moves(state, state.get_turn(), &captures[num_of_captures]);
         if (num_of_captures == 0) {
             //No captures of promotions, position is quiet
-            return static_eval;
+            return eval;
         }
         //Captures are ordered with SEE
         for (int i = 0; i < num_of_captures; i++) {
             moves.add(captures[i], (captures[i] == tt_move ? 32000 : static_exchange_evaluation(state, captures[i])));
         }
 
-        best_score = static_eval;
+        best_score = eval;
     } else {
         //When in check, we search all move
         chess_move all_moves[240];
@@ -1079,11 +1091,11 @@ int32_t alphabeta_search::quisearch(board_state &state, int32_t alpha, int32_t b
         eval_cache.prefetch(next_hash);
         move_cache.prefetch(next_hash);
 
-        stats.nodes += 1;
+        sc.stats.nodes += 1;
 
         unmove_data restore = state.make_move(mov, next_hash);
 
-        int32_t score = -quisearch(state, -beta, -alpha, ply+1, stats, is_pv);
+        int32_t score = -quisearch(state, -beta, -alpha, ply+1, sc, is_pv);
 
         state.unmake_move(mov, restore);
 
@@ -1110,7 +1122,7 @@ int32_t alphabeta_search::quisearch(board_state &state, int32_t alpha, int32_t b
         if (node_type == ALL_NODE && tt_hit) { //Only possible in check
             best_move = tt_move;
         }
-        move_cache[state.zhash].write(state.zhash, best_move, 0, node_type, best_score, static_eval, ply, current_cache_age);
+        move_cache[state.zhash].write(state.zhash, best_move, 0, node_type, best_score, raw_eval, ply, current_cache_age);
     }
     return best_score;
 }

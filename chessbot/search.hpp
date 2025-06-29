@@ -345,6 +345,10 @@ public:
     bool use_opening_book;
 
     chess_move fast_search(board_state &state, int depth, int max_nodes);
+    void abort_fast_search()  {
+        searching_flag = false;
+        alphabeta_abort_flag = true;
+    }
     chess_move search_time(board_state &state, uint64_t time_ms);
 
     void set_threads(int num_of_threads);
@@ -361,7 +365,7 @@ private:
     void search_root(int32_t window_alpha, int32_t window_beta, int depth, int thread_id);
 
     int32_t alphabeta(board_state &state, int32_t alpha, int32_t beta, int depth, int ply, search_context &sc, pv_table &pv, chess_move *skip_move, node_type_t expected_node_type);
-    int32_t quisearch(board_state &state, int32_t alpha, int32_t beta, int ply, search_statistics &stats, bool is_pv);
+    int32_t quisearch(board_state &state, int32_t alpha, int32_t beta, int ply, search_context &sc, bool is_pv);
 
 
     int number_of_helper_threads;

@@ -382,6 +382,7 @@ public:
         return false;
     }
 
+
     bool is_square_threatened(square_index pos, player_type_t player) const {
 
         bool color = (player == BLACK);

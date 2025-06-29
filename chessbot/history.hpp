@@ -67,7 +67,7 @@ struct history_heurestic_table
         return score;
     }
 
-    void update(chess_move bm, int depth, int ply, chess_move *searched_quiets, int searched_quiet_count, chess_move *searched_captures, int searched_capture_count) {
+    void update(const board_state &state, chess_move bm, int depth, int ply, chess_move *searched_quiets, int searched_quiet_count, chess_move *searched_captures, int searched_capture_count) {
         bool is_capture = bm.is_capture();
 
         if (!is_capture) {

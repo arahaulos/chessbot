@@ -78,10 +78,13 @@ struct selfplay_worker
         worker_id = worker_counter;
         worker_counter += 1;
         avg_depth = 0.0f;
+
+        bot = std::make_unique<alphabeta_search>();
     }
 
     void wait()
     {
+        bot->abort_fast_search();
         t.join();
     }
 
@@ -96,6 +99,8 @@ struct selfplay_worker
 private:
     void play(std::atomic<int> &games, int d, int n, bool random, std::shared_ptr<nnue_weights> weights);
 
+    std::unique_ptr<alphabeta_search> bot;
+
     std::thread t;
     int worker_id;
 };
@@ -104,8 +109,6 @@ private:
 void selfplay_worker::play(std::atomic<int> &games, int d, int n, bool random, std::shared_ptr<nnue_weights> weights)
 {
     std::srand((size_t)time(NULL) + worker_id);
-
-    std::unique_ptr<alphabeta_search> bot = std::make_unique<alphabeta_search>();
 
     bot->use_opening_book = !random;
     bot->set_shared_weights(weights);
@@ -183,6 +186,9 @@ void selfplay_worker::play(std::atomic<int> &games, int d, int n, bool random, s
             if (win_status != NO_WIN) {
                 //std::cout << "Worker " << worker_id << "  Game number: " << games << "  Result: " << win_type_to_str(win_status) << std::endl;
                 break;
+            }
+            if (games <= 0) {
+                return;
             }
         }
 
