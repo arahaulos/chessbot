@@ -121,7 +121,6 @@ struct history_heurestic_table
 
             if (ply > 0) {
                 chess_move previous_move = move_stack[ply-1];
-
                 if (previous_move != chess_move::null_move()) {
                     counter_moves[previous_move.get_moving_piece().d][previous_move.to.index] = bm;
                 }

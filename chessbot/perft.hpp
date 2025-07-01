@@ -21,7 +21,7 @@ private:
     uint64_t performance_perft(board_state &state, int depth);
     uint64_t debug_perft(board_state &state, int depth, int ply, search_context &sc, int32_t &eval_sum);
 
-    cache<tt_entry, 1> test_perft_tt;
+    cache<tt_bucket, 1> test_perft_tt;
 
     int cache_age;
 };

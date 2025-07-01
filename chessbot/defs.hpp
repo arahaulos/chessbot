@@ -11,8 +11,9 @@
 
 
 #define TT_SIZE 64
-#define EVAL_CACHE_SIZE 16
+#define EVAL_CACHE_SIZE 4
 #define DEFAULT_THREADS 1
+#define TT_ENTRIES_IN_BUCKET 4
 
 #define BOARD_WIDTH 8
 #define BOARD_HEIGHT 8

@@ -378,7 +378,7 @@ private:
 
     std::chrono::high_resolution_clock::time_point search_begin_time;
 
-    cache<tt_entry, TT_SIZE> move_cache;
+    cache<tt_bucket, TT_SIZE> move_cache;
     cache<eval_table_entry, EVAL_CACHE_SIZE> eval_cache;
 
     opening_book book;

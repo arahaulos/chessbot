@@ -80,7 +80,7 @@ int32_t alphabeta_search::get_transpostion_table_usage_permill()
     for (uint64_t i = 0; i < move_cache.get_size(); i += 10) {
         slots_used += move_cache[i].used(current_cache_age);
     }
-    return (slots_used*10000) / (move_cache.get_size()*2);
+    return (slots_used*10000) / (move_cache.get_size()*TT_ENTRIES_IN_BUCKET);
 }
 
 alphabeta_search::~alphabeta_search()
@@ -597,6 +597,7 @@ int32_t alphabeta_search::alphabeta(board_state &state, int32_t alpha, int32_t b
     int tt_node_type = ALL_NODE;
     int32_t tt_score = 0;
     int32_t tt_static_eval = 0;
+
     bool tt_hit = move_cache[zhash].read(state, zhash, tt_move, tt_depth, tt_node_type, tt_score, tt_static_eval, ply);
 
     sc.stats.cache_hits += tt_hit;
@@ -652,7 +653,7 @@ int32_t alphabeta_search::alphabeta(board_state &state, int32_t alpha, int32_t b
     sc.history.reset_killers(ply+2);
     pv_table line;
 
-    //Reverse futility pruning ~80 Elo
+    //Reverse futility pruning
     //If evaluation is good enough at shallow depth, we prune
     int32_t rfmargin = std::max(0, sp.rfmargin_base + sp.rfmargin_mult*depth - (improving ? sp.rfmargin_improving_modifier : 0));
     if (!is_pv &&
@@ -667,7 +668,7 @@ int32_t alphabeta_search::alphabeta(board_state &state, int32_t alpha, int32_t b
         return (eval + beta) / 2;
     }
 
-    //Null move pruning ~50 Elo
+    //Null move pruning
     chess_move threat_move = chess_move::null_move();
     int non_pawn_pieces = state.count_non_pawn_pieces(state.get_turn());
     if (!is_pv &&
@@ -733,7 +734,7 @@ int32_t alphabeta_search::alphabeta(board_state &state, int32_t alpha, int32_t b
     }
 
 
-    //IIR ~22elo at 1s + 20ms time control
+    //IIR
     //If this unexplored part of tree proves to be important, there will be tt hits at next search
     if ((is_pv || is_cut) && depth >= 3 && !tt_hit) {
         depth -= 1;
@@ -741,7 +742,7 @@ int32_t alphabeta_search::alphabeta(board_state &state, int32_t alpha, int32_t b
 
     int tt_move_extensions = 0;
     if (tt_hit &&
-        tt_node_type == CUT_NODE &&
+        (tt_node_type == CUT_NODE || tt_node_type == PV_NODE) &&
         tt_depth >= (depth-3) &&
         depth > 5 &&
         skip_move == nullptr &&
@@ -752,22 +753,22 @@ int32_t alphabeta_search::alphabeta(board_state &state, int32_t alpha, int32_t b
         int32_t score = alphabeta(state, singular_beta-1, singular_beta, depth / 2, ply, sc, line, &tt_move, (is_cut ? CUT_NODE : ALL_NODE));
 
         if (score < singular_beta) {
-            //Singular extension >60 elo
+            //Singular extension
             //TT move is better than rest of the moves. This node is singular and should be searcher with more carefully
             tt_move_extensions += 1 + (score + 10*depth < tt_score);
         } else if (singular_beta >= beta && !is_mate_score(score) && !is_pv) {
-            //Multicut. ~10 Elo
+            //Multicut
             //We have proved that there is multiple moves that fails-high in this node
             //Changes that deeper search doesn't fail high is very low
-            return singular_beta;
+            return score;
         } else if (tt_score >= beta && !is_pv) {
-            //~5 elo
             //Singular beta wasn't enough high to get cut-off. Other moves are also good.
             tt_move_extensions -= 2;
-        } else if (is_cut) {
+        } else if (is_cut || is_pv) {
             tt_move_extensions -= 1;
         }
     }
+
 
     move_picker &mpicker = sc.move_pickers[ply];
     mpicker.init(state, ply, tt_move, threat_move, sc.history, experimental_features);
@@ -795,7 +796,7 @@ int32_t alphabeta_search::alphabeta(board_state &state, int32_t alpha, int32_t b
 
         reductions -= (history_score / sp.lmr_hist_adjust);
 
-        //Forward pruning at low depth. >100 Elo
+        //Forward pruning at low depth
         if (best_score != MIN_EVAL && !is_mate_score(best_score) && ply > 2) {
             int d = depth;
             int rd = std::clamp(depth - reductions, 1, d);
@@ -803,7 +804,7 @@ int32_t alphabeta_search::alphabeta(board_state &state, int32_t alpha, int32_t b
 
             if ((mpicker.legal_moves >= (d*d+6)   && improving) ||
                 (mpicker.legal_moves >= (d*d+6)/2 && !improving)) {
-                mpicker.skip_quiets(); //Late move pruning > 60 elo. Currently does not prune killers
+                mpicker.skip_quiets(); //Late move pruning. Currently does not prune killers
             }
 
 
@@ -853,7 +854,7 @@ int32_t alphabeta_search::alphabeta(board_state &state, int32_t alpha, int32_t b
         int new_depth = depth + extensions - 1;
         int reduced_depth = new_depth;
 
-        //Late move reduction ~190 Elo on 8s + 0.1
+        //Late move reduction
         //Non PV nodes starts reducing after first move, PV nodes start reducing after second move
         //Captures are not reduced at PV nodes
         if (new_depth >= 3 &&
@@ -983,6 +984,7 @@ int32_t alphabeta_search::alphabeta(board_state &state, int32_t alpha, int32_t b
         if (node_type == ALL_NODE && tt_hit) {
             best_move = tt_move;
         }
+
         move_cache[zhash].write(zhash, best_move, depth, node_type, best_score, raw_eval, ply, current_cache_age);
     }
 
@@ -996,6 +998,8 @@ int32_t alphabeta_search::quisearch(board_state &state, int32_t alpha, int32_t b
     if (ply >= MAX_DEPTH) {
         return static_evaluation(state, state.get_turn(), sc.stats);
     }
+
+    sc.stats.max_distance_to_root = std::max(sc.stats.max_distance_to_root, ply);
 
     bool in_check = state.in_check(state.get_turn());
 

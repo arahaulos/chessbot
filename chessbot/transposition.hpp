@@ -51,18 +51,18 @@ struct eval_table_entry
 
     void clear()
     {
-        key = 0;
-        score = 0;
+        data = 0;
     }
 
-    uint64_t key;
-    int32_t score;
-    bool read(const uint64_t &zhash, int32_t &score_out) const  {
-        eval_table_entry entry;
-        memcpy(&entry, this, sizeof(eval_table_entry));
 
-        if ((zhash ^ ((int64_t)entry.score)) == entry.key) {
-            score_out = entry.score;
+    uint64_t data;
+    bool read(const uint64_t &zhash, int32_t &score_out) const  {
+        uint64_t data_to_read = data;
+
+        if ((data_to_read & 0xFFFFFFFFFFFF0000) == (zhash & 0xFFFFFFFFFFFF0000)) {
+            int16_t score16 = (data_to_read & 0xFFFF);
+
+            score_out = score16;
 
             return true;
         } else {
@@ -71,19 +71,17 @@ struct eval_table_entry
     }
 
     void write(const uint64_t &zhash, int32_t score_to_write) {
+        int16_t score16 = score_to_write;
+        uint64_t new_data = (zhash & 0xFFFFFFFFFFFF0000) | score16;
 
-        eval_table_entry entry;
-        entry.score = score_to_write;
-        entry.key = (zhash ^ ((int64_t)entry.score));
-
-        memcpy(this, &entry, sizeof(eval_table_entry));
+        data = new_data;
     }
 };
 
 
-struct tt_entry_slot
+struct tt_entry
 {
-    tt_entry_slot() {};
+    tt_entry() {};
 
     void clear()
     {
@@ -156,58 +154,68 @@ struct tt_entry_slot
 };
 
 
-struct tt_entry
+struct tt_bucket
 {
-    tt_entry() {};
+    tt_bucket() {};
 
     void clear()
     {
-        slots[0].clear();
-        slots[1].clear();
+        for (int i = 0; i < TT_ENTRIES_IN_BUCKET; i++) {
+            entries[i].clear();
+        }
     }
 
     int used(int current_cache_age) {
-        bool slot0_free = ((slots[TT_SLOT_DEPTH_PREFERRED].age_depth >> 7) + 2) <= current_cache_age || slots[TT_SLOT_DEPTH_PREFERRED].static_eval_type == 0x7FFF;
-        bool slot1_free = ((slots[TT_SLOT_ALWAYS_REPLACE].age_depth >> 7)  + 2) <= current_cache_age || slots[TT_SLOT_ALWAYS_REPLACE].static_eval_type  == 0x7FFF;
-        return 2 - slot0_free - slot1_free;
+        int used = 0;
+        for (int i = 0; i < TT_ENTRIES_IN_BUCKET; i++) {
+            if (((entries[i].age_depth >> 7) + 2) > current_cache_age && entries[TT_SLOT_DEPTH_PREFERRED].static_eval_type != 0x7FFF) {
+                used++;
+            }
+        }
+        return used;
     }
 
     bool read(const board_state &state, const uint64_t &zhash, chess_move &bm, int &d, int &t, int32_t &e, int32_t &se, int ply) const {
-        tt_entry_slot entry0;
-        tt_entry_slot entry1;
 
-        memcpy(&entry0, &slots[TT_SLOT_DEPTH_PREFERRED], sizeof(tt_entry_slot));
-        memcpy(&entry1, &slots[TT_SLOT_ALWAYS_REPLACE], sizeof(tt_entry_slot));
+        tt_bucket buck;
+        memcpy(&buck, this, sizeof(tt_bucket));
 
-        if (entry0.is_valid(zhash)) {
+        for (int i = 0; i < TT_ENTRIES_IN_BUCKET; i++) {
+            if (buck.entries[i].is_valid(zhash)) {
+                buck.entries[i].decode(state, bm, d, t, e, se, ply);
 
-            entry0.decode(state, bm, d, t, e, se, ply);
-
-            return true;
-        } else if (entry1.is_valid(zhash)) {
-
-            entry1.decode(state, bm, d, t, e, se, ply);
-
-            return true;
+                return true;
+            }
         }
 
         return false;
     }
 
     void write(const uint64_t &zhash, chess_move bm, int d, int t, int32_t e, int32_t se, int ply, int current_age) {
-        tt_entry_slot entry;
 
-        entry.encode(zhash, bm, d, t, e, se, ply, current_age);
+        tt_entry new_entry;
+        new_entry.encode(zhash, bm, d, t, e, se, ply, current_age);
 
-        if (entry.get_effective_depth(current_age) >= slots[TT_SLOT_DEPTH_PREFERRED].get_effective_depth(current_age)) {
-            memcpy(&slots[TT_SLOT_ALWAYS_REPLACE], &slots[TT_SLOT_DEPTH_PREFERRED], sizeof(tt_entry_slot));
-            memcpy(&slots[TT_SLOT_DEPTH_PREFERRED], &entry, sizeof(tt_entry_slot));
-        } else {
-            memcpy(&slots[TT_SLOT_ALWAYS_REPLACE], &entry, sizeof(tt_entry_slot));
+        for (int i = 0; i < TT_ENTRIES_IN_BUCKET; i++) {
+            if (entries[i].is_valid(zhash)) {
+                entries[i] = new_entry;
+                return;
+            }
         }
+        int lowest_edepth = entries[0].get_effective_depth(current_age);
+        int lowest_entry = 0;
+        for (int i = 1; i < TT_ENTRIES_IN_BUCKET; i++) {
+            int edepth = entries[i].get_effective_depth(current_age);
+            if (edepth < lowest_edepth) {
+                lowest_entry = i;
+                lowest_edepth = edepth;
+            }
+        }
+
+        entries[lowest_entry] = new_entry;
     }
 
-    tt_entry_slot slots[2];
+    tt_entry entries[TT_ENTRIES_IN_BUCKET];
 };
 
 

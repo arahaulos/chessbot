@@ -149,6 +149,39 @@ uint64_t perft::debug_perft(board_state &state, int depth, int ply, search_conte
 
         c = 0;
 
+        if (state.get_square(m.from) != m.get_moving_piece()) {
+            std::cout << "Error: moving piece doesn't match!" << std::endl;
+            return 0;
+        }
+
+        bool is_en_passant = (m.get_moving_piece().get_type() == PAWN && m.to == state.en_passant_square && (state.flags & EN_PASSANT_AVAILABLE) != 0);
+        if (is_en_passant) {
+            if (!m.is_capture()) {
+                std::cout << "Error: en passant is not marked capture!" << std::endl;
+                return 0;
+            }
+            if (m.get_captured_piece() != piece(next_turn(state.get_turn()), PAWN)) {
+                std::cout << "Error: en passant capture piece not opponent pawn" << std::endl;
+                return 0;
+            }
+        } else {
+            if (m.is_capture()) {
+                if (m.get_captured_piece() != state.get_square(m.to)) {
+                    std::cout << "Error: captured piece doesn't match" << std::endl;
+                    return 0;
+                }
+                if (state.get_square(m.to).get_type() == EMPTY) {
+                    std::cout << "Error: non capture marked as capture" << std::endl;
+                    return 0;
+                }
+            } else {
+                if (state.get_square(m.to).get_type() != EMPTY) {
+                    std::cout << "Error: capture marked as non capture" << std::endl;
+                    return 0;
+                }
+            }
+        }
+
         uint64_t new_zhash = hashgen.update_hash(state.zhash, state, m);
 
         test_perft_tt.prefetch(new_zhash);
