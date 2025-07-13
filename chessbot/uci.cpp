@@ -25,6 +25,8 @@ uci_interface::uci_interface(std::shared_ptr<alphabeta_search> search_inst, std:
     search_instance = search_inst;
     game_instance = game_inst;
     exit_flag = false;
+
+    time_man = std::make_shared<time_manager>(0,0);
 }
 
 uci_interface::~uci_interface()
@@ -225,7 +227,16 @@ void uci_interface::execute_command(std::string cmd_line)
         }
         ginfo = info;
 
-        search_instance->begin_search(game_instance->get_state());
+        if (info.type == GO_CLOCK) {
+            if (game_instance->get_state().get_turn() == WHITE) {
+                time_man->init(info.wtime, info.winc);
+            } else {
+                time_man->init(info.btime, info.binc);
+            }
+            search_instance->begin_search(game_instance->get_state(), time_man);
+        } else {
+            search_instance->begin_search(game_instance->get_state());
+        }
 
         last_info_depth = 0;
     } else if (cmd == "stop") {
@@ -371,7 +382,7 @@ void uci_interface::update()
         send_command("bestmove " + search_instance->get_move().to_uci());
         ginfo.active = false;
 
-    } else if (ginfo.type == GO_CLOCK) {
+    } /*else if (ginfo.type == GO_CLOCK) {
         int time_left, time_inc;
         if (game_instance->get_state().get_turn() == WHITE) {
             time_left = ginfo.wtime;
@@ -388,7 +399,7 @@ void uci_interface::update()
             send_command("bestmove " + search_instance->get_move().to_uci());
             ginfo.active = false;
         }
-    }
+    }*/
 }
 
 

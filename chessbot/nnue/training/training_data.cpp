@@ -55,9 +55,17 @@ float find_scaling_factor_for_data(const std::vector<training_position> &data)
 
 void filter_and_convert_data(std::vector<selfplay_result> &data_in, std::vector<training_position> &data_out)
 {
+    //This function filters selfplay results
+
     std::vector<training_position> data;
 
     data.reserve(data_in.size());
+
+    bool is_tactical0 = false;
+    /*bool is_tactical1 = false;
+    bool is_tactical2 = false;*/
+
+    //training_position pos_to_add = data_in[0];
 
     board_state state;
     for (size_t i = 0; i < data_in.size(); i++) {
@@ -65,23 +73,26 @@ void filter_and_convert_data(std::vector<selfplay_result> &data_in, std::vector<
 
         //float result = (state.get_turn() == WHITE ? data_in[i].wdl : 1.0f-data_in[i].wdl);
 
-        bool not_quiet = state.get_square(data_in[i].bm.to).get_type() != EMPTY || state.in_check(WHITE) || state.in_check(BLACK);
+        is_tactical0 = (state.get_square(data_in[i].bm.to).get_type() != EMPTY) || state.in_check(WHITE) || state.in_check(BLACK);
 
         //bool wdl_eval_conflict = (result > 0.5f && data_in[i].eval < -300) || (result < 0.5f && data_in[i].eval > 300);
 
-        if (!not_quiet) {
-
-            data_in[i].eval = data_in[i].eval;
-
+        if (!is_tactical0/* && !is_tactical1 && !is_tactical2*/) {
+            //data.push_back(pos_to_add);
             data.emplace_back(state, data_in[i]);
         }
+
+        /*pos_to_add = training_position(state, data_in[i]);
+        is_tactical2 = is_tactical1;
+        is_tactical1 = is_tactical0;*/
+
         if ((i % 100000) == 0) {
             std::cout << "\rFiltering and converting data: " << (i*100)/data_in.size() << "%   ";
         }
     }
     std::cout << std::endl;
 
-    std::vector<training_position> batch = get_random_batch(data, 10000);
+    std::vector<training_position> batch = get_random_batch(data, 20000);
     float scaling_factor = find_scaling_factor_for_data(batch);
 
 
@@ -284,11 +295,11 @@ void training_batch_manager::load_epoch(training_position *buffer)
         reader->read<training_position>(pos, chunk_size, &buffer[i*chunk_size]);
     }
 
-    for (size_t i = epoch_size - 1; i > 0; --i) {
+    /*for (size_t i = epoch_size - 1; i > 0; --i) {
         size_t j = dist(gen) % (i+1);
 
         std::swap(buffer[i], buffer[j]);
-    }
+    }*/
 }
 
 

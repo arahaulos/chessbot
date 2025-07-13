@@ -79,6 +79,7 @@ private:
 
     std::shared_ptr<alphabeta_search> search_instance;
     std::shared_ptr<game_state> game_instance;
+    std::shared_ptr<time_manager> time_man;
 };
 
 std::vector<std::string> split_string(std::string str, char d);

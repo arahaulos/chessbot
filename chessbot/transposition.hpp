@@ -90,6 +90,10 @@ struct tt_entry
         static_eval_type = 0x7FFF;
     }
 
+    int get_depth() const {
+        return (int)(age_depth & 0x7f);
+    }
+
     int get_effective_depth(int current_cache_age) const {
 
         int age = (int)(age_depth >> 7);

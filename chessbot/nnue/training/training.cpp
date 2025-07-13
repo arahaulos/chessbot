@@ -489,10 +489,11 @@ void training_loop(std::string net_file, std::string qnet_file, std::shared_ptr<
     training_batch_manager batch_manager(batch_size, epoch_size, dataset);
 
     auto t0 = std::chrono::high_resolution_clock::now();
-    auto last_save_time = t0;
 
     float batch_cost;
     float training_cost = 0.0f;
+
+    int epoch = 0;
 
 
     std::cout << std::endl;
@@ -513,6 +514,17 @@ void training_loop(std::string net_file, std::string qnet_file, std::shared_ptr<
 
 
         batch_manager.load_new_batch();
+
+
+        if (batch_manager.get_epochs() != epoch) {
+            epoch = batch_manager.get_epochs();
+
+            weights->save_file(net_file);
+            weights->save_quantized(qnet_file);
+
+            std::cout << "Net saved!" << std::endl;
+        }
+
 
         thread_pool.sync(batch_manager.get_current_batch(), gradient, batch_size, min_lambda, max_lambda, net.use_factorizer, batch_cost);
 
@@ -540,15 +552,6 @@ void training_loop(std::string net_file, std::string qnet_file, std::shared_ptr<
 
         //gradient_descent(*weights, first_moment, learning_rate);
         rmsprop(*weights, corrected_first_moment, corrected_second_moment, learning_rate);
-
-        if (std::chrono::duration_cast<std::chrono::seconds>( t0 - last_save_time ).count() > 60) {
-            last_save_time = t0;
-
-            weights->save_file(net_file);
-            weights->save_quantized(qnet_file);
-
-            std::cout << "Net saved!" << std::endl;
-        }
 
         float kspers = std::clamp((float)batch_size / ms.count(), 0.0f, 9999.0f);
 

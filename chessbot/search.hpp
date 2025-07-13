@@ -18,6 +18,7 @@
 #include "defs.hpp"
 #include "history.hpp"
 #include "movepicker.hpp"
+#include "time_managment.hpp"
 
 struct search_params
 {
@@ -138,6 +139,9 @@ struct search_statistics
         static_eval_error_samples += other.static_eval_error_samples;
         corrected_eval_error += other.corrected_eval_error;
 
+        eval_diff += other.eval_diff;
+        eval_diff_samples += other.eval_diff_samples;
+
         avg_se_diff += other.avg_se_diff;
         se_diff_samples += other.se_diff_samples;
 
@@ -150,6 +154,9 @@ struct search_statistics
 
     int64_t static_eval_error;
     int64_t static_eval_error_samples;
+
+    int64_t eval_diff;
+    int64_t eval_diff_samples;
 
     int64_t corrected_eval_error;
 
@@ -242,6 +249,8 @@ struct search_context
         history.move_stack = moves;
     }
 
+    bool main_thread;
+
     board_state state;
     search_statistics stats;
 
@@ -262,8 +271,6 @@ struct search_context
 class alphabeta_search
 {
 public:
-    bool print_search_info;
-
     alphabeta_search();
     ~alphabeta_search();
     alphabeta_search(const alphabeta_search &other);
@@ -294,7 +301,14 @@ public:
 
 
     void new_game();
-    void begin_search(const board_state &state);
+
+
+    void begin_search(const board_state &state, std::shared_ptr<time_manager> tman);
+
+    void begin_search(const board_state &state) {
+        begin_search(state, nullptr);
+    }
+
     void stop_search();
     void set_multi_pv(int num) {
         num_of_pvs = num;
@@ -349,7 +363,7 @@ public:
         searching_flag = false;
         alphabeta_abort_flag = true;
     }
-    chess_move search_time(board_state &state, uint64_t time_ms);
+    chess_move search_time(board_state &state, uint64_t max_time_ms, std::shared_ptr<time_manager> tman);
 
     void set_threads(int num_of_threads);
     void set_transposition_table_size_MB(int size_MB);
@@ -406,6 +420,7 @@ private:
     std::vector<std::pair<chess_move, int32_t>> root_moves;
 
     std::shared_ptr<nnue_weights> shared_nnue_weights;
+    std::shared_ptr<time_manager> time_man;
 
     int limit_nodes;
     int min_depth;

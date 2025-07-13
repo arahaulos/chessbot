@@ -13,7 +13,6 @@ application::application()
     game = std::make_shared<game_state>();
 
     alphabeta = std::make_shared<alphabeta_search>();
-    alphabeta->print_search_info = false;
     alphabeta->use_opening_book = false;
 
     //alphabeta->load_nnue_net("qnetkb16d2_1.nnue");
@@ -26,7 +25,7 @@ application::application()
 }
 
 
-void application::selfplay(std::string folder, std::string nnue_file, int threads, int depth, int nodes, int games_per_file, int max_files)
+void application::selfplay(std::string folder, std::string nnue_file, int threads, int depth, int nodes, bool random, int games_per_file, int max_files)
 {
     int filenum = 0;
     while (filenum < max_files) {
@@ -42,7 +41,7 @@ void application::selfplay(std::string folder, std::string nnue_file, int thread
             file.close();
             continue;
         }
-        tuning_utility::selfplay(filename, nnue_file, threads, games_per_file, depth, nodes, true);
+        tuning_utility::selfplay(filename, nnue_file, threads, games_per_file, depth, nodes, random);
     }
 }
 

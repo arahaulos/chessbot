@@ -111,6 +111,9 @@ struct move_picker
 
         if (tt_move.valid()) {
             tt_move_valid = move_generator::is_move_valid(*state, tt_move_a);
+            if (!tt_move_valid) {
+                std::cout << "TT move not valid!" << std::endl;
+            }
         }
 
         captures_generated = false;
@@ -258,6 +261,8 @@ struct move_picker
     }
 
     void add_quiet_moves(chess_move *moves, int num_of_moves) {
+        constexpr int32_t good_quiet_treshold = 3000;
+
         for (int i = 0; i < num_of_moves; i++) {
             chess_move m = moves[i];
             if (m == tt_move || killers.contains(m)) {
@@ -265,7 +270,7 @@ struct move_picker
             }
             int32_t score = history_table->get_quiet_history(ply, m) + get_threats_score(m);
 
-            if (score > 3000 && !good_non_killers.is_full()) {
+            if (score > good_quiet_treshold && !good_non_killers.is_full()) {
                 good_non_killers.add(m, score);
             } else {
                 bad_non_killers.add(m, score);

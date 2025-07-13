@@ -6,6 +6,7 @@ constexpr int32_t correction_history_grain = 512;
 constexpr int32_t correction_pawn_table_size = 16384;
 constexpr int32_t correction_material_table_size = 2048;
 constexpr int32_t correction_clamp = 100;
+constexpr int32_t pawn_history_size = 2048;
 
 struct piece_square_history
 {
