@@ -32,7 +32,6 @@ struct nnue_weights
     void load_sb(std::string path);
 };
 
-
 struct nnue_network
 {
     nnue_network(std::shared_ptr<nnue_weights> w): weights(w),
@@ -84,7 +83,6 @@ struct nnue_network
     }
 
     std::shared_ptr<nnue_weights> weights;
-
 private:
     nnue_perspective<num_perspective_inputs, num_perspective_neurons> black_side;
     nnue_perspective<num_perspective_inputs, num_perspective_neurons> white_side;

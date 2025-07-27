@@ -90,7 +90,6 @@ inline int encode_output_bucket(uint64_t non_pawn_pieces)
     return b;
 }
 
-
 struct training_weights
 {
     training_perspective_weights<num_perspective_inputs + factorizer_inputs, num_perspective_neurons> perspective_weights;

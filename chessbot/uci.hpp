@@ -5,13 +5,14 @@
 #include "game.hpp"
 #include <queue>
 #include <sstream>
+#include <fstream>
 
 #ifdef __MINGW64__
 #include <windows.h>
 #endif
 
 
-enum go_type_t {GO_PONDER, GO_CLOCK, GO_MOVETIME, GO_INFINITE, GO_DEPTH};
+enum go_type_t {GO_PONDER, GO_CLOCK, GO_MOVETIME, GO_INFINITE};
 struct go_info
 {
     go_info() {
@@ -21,7 +22,6 @@ struct go_info
         winc = 0;
         binc = 0;
         movetime = 0;
-        depth = 0;
     }
 
     bool active;
@@ -33,7 +33,6 @@ struct go_info
     int binc;
 
     int movetime;
-    int depth;
 };
 
 
@@ -80,6 +79,8 @@ private:
     std::shared_ptr<alphabeta_search> search_instance;
     std::shared_ptr<game_state> game_instance;
     std::shared_ptr<time_manager> time_man;
+
+    std::ofstream uci_log;
 };
 
 std::vector<std::string> split_string(std::string str, char d);

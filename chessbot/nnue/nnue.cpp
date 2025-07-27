@@ -5,9 +5,6 @@
 
 void nnue_network::refresh(const board_state &s, player_type_t stm)
 {
-    //evaluate(s);
-    //return;
-
     if (stm == WHITE) {
         white_side.reset();
         white_side.incremental_updates = true;

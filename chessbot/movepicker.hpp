@@ -96,12 +96,12 @@ struct scored_move_array
 
 struct move_picker
 {
-    void init(board_state &state_a, int ply_a, chess_move tt_move_a, chess_move threat_move_a, history_heurestic_table &history_table_a, bool experimental_features_a) {
+    void init(board_state &state_a, int ply_a, chess_move tt_move_a, chess_move threat_move_a, history_heurestic_table &history_table_a, bool test_flag_a) {
         history_table = &history_table_a;
         state = &state_a;
         ply = ply_a;
 
-        experimental_features = experimental_features_a;
+        test_flag = test_flag_a;
 
         threat_move = threat_move_a;
         tt_move = tt_move_a;
@@ -268,6 +268,7 @@ struct move_picker
             if (m == tt_move || killers.contains(m)) {
                 continue;
             }
+
             int32_t score = history_table->get_quiet_history(ply, m) + get_threats_score(m);
 
             if (score > good_quiet_treshold && !good_non_killers.is_full()) {
@@ -312,7 +313,6 @@ struct move_picker
                     return TT_MOVE;
                 }
                 stage = GOOD_CAPTURE_MOVE;
-
             case GOOD_CAPTURE_MOVE:
 
                 if (!captures_generated) {
@@ -443,7 +443,7 @@ private:
 
     bool skip_quiets_flag;
 
-    bool experimental_features;
+    bool test_flag;
 };
 
 

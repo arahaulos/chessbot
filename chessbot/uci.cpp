@@ -18,7 +18,6 @@ std::vector<std::string> split_string(std::string str, char d)
 }
 
 
-
 uci_interface::uci_interface(std::shared_ptr<alphabeta_search> search_inst, std::shared_ptr<game_state> game_inst)
 {
     running = false;
@@ -27,12 +26,18 @@ uci_interface::uci_interface(std::shared_ptr<alphabeta_search> search_inst, std:
     exit_flag = false;
 
     time_man = std::make_shared<time_manager>(0,0);
+
+    //uci_log.open("uci_log.txt");
 }
 
 uci_interface::~uci_interface()
 {
     if (running) {
         stop();
+    }
+
+    if (uci_log.is_open()) {
+        uci_log.close();
     }
 }
 
@@ -96,6 +101,11 @@ bool uci_interface::get_command(std::string &str_out)
         str_out = inputs.front();
         inputs.pop();
         r = true;
+
+        if (uci_log.is_open()) {
+            uci_log << "GUI: " << str_out << "\n";
+        }
+
     }
     input_lock.unlock();
 
@@ -104,6 +114,10 @@ bool uci_interface::get_command(std::string &str_out)
 
 void uci_interface::send_command(std::string cmd)
 {
+    if (uci_log.is_open()) {
+        uci_log << "ENG: " << cmd << "\n";
+    }
+
     std::cout << cmd << std::endl;
 }
 
@@ -214,8 +228,12 @@ void uci_interface::execute_command(std::string cmd_line)
                     info.binc = std::atoi(next_it->c_str());
                 }
                 if (str == "depth") {
-                    info.type = GO_DEPTH;
-                    info.depth = std::atoi(next_it->c_str());
+                    info.type = GO_INFINITE;
+                    search_instance->limit_search(std::atoi(next_it->c_str()), 1);
+                }
+               if (str == "nodes") {
+                    info.type = GO_INFINITE;
+                    search_instance->limit_search(0, std::atoi(next_it->c_str()));
                 }
             }
             if (str == "infinite") {
@@ -291,6 +309,74 @@ void uci_interface::update()
         return;
     }
 
+    int search_time = search_instance->get_search_time_ms();
+    int latest_depth = search_instance->get_depth();
+    if (latest_depth != last_info_depth) {
+
+        int hashfull = search_instance->get_transpostion_table_usage_permill();
+        int multi_pv = search_instance->get_multi_pv();
+        uint64_t nps = search_instance->get_nps();
+
+        for (int i = last_info_depth+1; i <= latest_depth; i++) {
+            search_info info = search_instance->get_search_info(i);
+
+            for (int j = 0; j < multi_pv; j++) {
+                int32_t eval = info.lines[j]->score;
+
+                if (eval == MIN_EVAL) {
+                    continue;
+                }
+                //std::string bm = info.lines[j]->moves[0].to_uci();
+
+                std::stringstream ss;
+                ss << "info depth ";
+                ss << info.depth;
+
+                ss << " seldepth ";
+
+                ss << info.seldepth;
+
+                ss << " multipv " << j + 1;
+
+                if (is_mate_score(eval)) {
+                    ss << " score mate ";
+                    if (eval > 0) {
+                        ss << (get_mate_distance(eval)+1)/2;
+                    } else {
+                        ss << (-(get_mate_distance(eval)+1)/2);
+                    }
+                } else {
+                    ss << " score cp ";
+                    ss << eval;
+                }
+
+
+                ss << " nodes ";
+                ss << info.nodes;
+
+                ss << " nps ";
+                ss << nps;
+                ss << " hashfull ";
+                ss << hashfull;
+                //ss << " bm ";
+                //ss << bm;
+
+                ss << " time ";
+                ss << search_time;
+                ss << " pv";
+
+                for (int k = 0; k < info.lines[j]->num_of_moves; k++) {
+                    ss << " ";
+                    ss << info.lines[j]->moves[k].to_uci();
+                }
+
+                send_command(ss.str());
+            }
+
+        }
+        last_info_depth = latest_depth;
+    }
+
 
     if (search_instance->is_ready_to_stop()) {
         search_instance->stop_search();
@@ -300,76 +386,6 @@ void uci_interface::update()
         return;
     }
 
-    int search_time = search_instance->get_search_time_ms();
-
-    if (search_instance->get_depth() != last_info_depth) {
-        int hashfull = search_instance->get_transpostion_table_usage_permill();
-
-        int depth = search_instance->get_depth();
-        int multi_pv = search_instance->get_multi_pv();
-        for (int i = 0; i < multi_pv; i++) {
-            int32_t eval = search_instance->get_evaluation(i);
-
-            if (eval == MIN_EVAL) {
-                continue;
-            }
-
-            uint64_t nps = search_instance->get_nps();
-            uint64_t nodes = search_instance->get_node_count();
-            int seldepth = search_instance->get_max_depth_reached();
-            std::string bm = search_instance->get_move(i).to_uci();
-
-            std::stringstream ss;
-            ss << "info depth ";
-            ss << depth;
-
-            ss << " seldepth ";
-
-            ss << seldepth;
-
-            if (multi_pv > 1) {
-                ss << " multipv " << i + 1;
-            }
-
-
-            ss << " nodes ";
-            ss << nodes;
-
-            if (is_mate_score(eval)) {
-                ss << " score mate ";
-                if (eval > 0) {
-                    ss << (get_mate_distance(eval)+1)/2;
-                } else {
-                    ss << (-(get_mate_distance(eval)+1)/2);
-                }
-            } else {
-                ss << " score cp ";
-                ss << eval;
-            }
-            ss << " nps ";
-            ss << nps;
-            ss << " hashfull ";
-            ss << hashfull;
-            ss << " bm ";
-            ss << bm;
-
-            ss << " time ";
-            ss << search_time;
-            ss << " pv";
-
-            pv_table pv;
-            search_instance->get_pv(pv, i);
-
-            for (int i = 0; i < pv.num_of_moves; i++) {
-                ss << " ";
-                ss << pv.moves[i].to_uci();
-            }
-
-            send_command(ss.str());
-        }
-
-        last_info_depth = depth;
-    }
 
     if (ginfo.type == GO_MOVETIME && search_time >= ginfo.movetime) {
         search_instance->stop_search();
@@ -377,29 +393,7 @@ void uci_interface::update()
         send_command("bestmove " + search_instance->get_move().to_uci());
         ginfo.active = false;
 
-    } else if (ginfo.type == GO_DEPTH && search_instance->get_depth() >= ginfo.depth) {
-        search_instance->stop_search();
-        send_command("bestmove " + search_instance->get_move().to_uci());
-        ginfo.active = false;
-
-    } /*else if (ginfo.type == GO_CLOCK) {
-        int time_left, time_inc;
-        if (game_instance->get_state().get_turn() == WHITE) {
-            time_left = ginfo.wtime;
-            time_inc = ginfo.winc;
-        } else {
-            time_left = ginfo.btime;
-            time_inc = ginfo.binc;
-        }
-
-        int target_time = get_target_search_time(time_left, time_inc);
-
-        if (search_time >= target_time) {
-            search_instance->stop_search();
-            send_command("bestmove " + search_instance->get_move().to_uci());
-            ginfo.active = false;
-        }
-    }*/
+    }
 }
 
 

@@ -119,7 +119,7 @@ struct time_manager
         return time_used;
     }
 
-    bool experimental_features;
+    bool test_flag;
 private:
     int time_left;
     int time_inc;

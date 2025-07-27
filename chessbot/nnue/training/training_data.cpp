@@ -4,7 +4,6 @@
 #include <random>
 #include <sstream>
 #include <filesystem>
-#include <random>
 
 
 float evaluation_wdl_mse(const std::vector<training_position> &data, float scaling_factor)
@@ -286,20 +285,49 @@ void training_batch_manager::load_epoch(training_position *buffer)
 
     std::uniform_int_distribution<uint64_t> dist(0, UINT64_MAX);
 
-    size_t chunk_size = 1000;
+    std::vector<size_t> indices(epoch_size);
+    for (int i = 0; i < epoch_size; i++) {
+        indices[i] = dist(gen) % reader->get_size<training_position>();
+    }
+
+    std::sort(indices.begin(), indices.end());
+
+    size_t fetch_index = 0;
+
+    size_t chunk_size = 1024*1024*16;
+    std::vector<training_position> chunk(chunk_size);
+
+    size_t read_index = 0;
+    while (read_index < reader->get_size<training_position>()) {
+        if (read_index + chunk_size > reader->get_size<training_position>()) {
+            chunk_size = reader->get_size<training_position>() - read_index;
+        }
+
+        reader->read<training_position>(read_index, chunk_size, chunk.data());
+
+        while (fetch_index < epoch_size && indices[fetch_index] < read_index + chunk_size) {
+            buffer[fetch_index] = chunk[indices[fetch_index] - read_index];
+            fetch_index++;
+        }
+
+        read_index += chunk_size;
+    }
+
+
+    /*size_t chunk_size = 1000;
     size_t chunks = epoch_size / chunk_size;
 
     for (int i = 0; i < chunks; i++) {
         uint64_t pos = dist(gen) % (reader->get_size<training_position>() - chunk_size);
 
         reader->read<training_position>(pos, chunk_size, &buffer[i*chunk_size]);
-    }
+    }*/
 
-    /*for (size_t i = epoch_size - 1; i > 0; --i) {
+    for (size_t i = epoch_size - 1; i > 0; --i) {
         size_t j = dist(gen) % (i+1);
 
         std::swap(buffer[i], buffer[j]);
-    }*/
+    }
 }
 
 

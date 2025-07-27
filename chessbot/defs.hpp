@@ -3,21 +3,21 @@
 #include <limits>
 
 
-#define MAX_DEPTH 128
-#define KILLER_MOVE_SLOTS 2
-#define MAX_THREADS 32
-#define MIN_THREADS 1
-#define MAX_MULTI_PV 16
+constexpr int MAX_DEPTH = 128;
+constexpr int KILLER_MOVE_SLOTS = 2;
+constexpr int MAX_THREADS = 32;
+constexpr int MIN_THREADS = 1;
+constexpr int MAX_MULTI_PV = 16;
 
 
-#define TT_SIZE 64
-#define EVAL_CACHE_SIZE 4
-#define DEFAULT_THREADS 1
-#define TT_ENTRIES_IN_BUCKET 4
+constexpr int TT_SIZE = 64;
+constexpr int EVAL_CACHE_SIZE = 4;
+constexpr int DEFAULT_THREADS = 1;
+constexpr int TT_ENTRIES_IN_BUCKET = 4;
 
-#define BOARD_WIDTH 8
-#define BOARD_HEIGHT 8
-#define BOARD_SQUARES BOARD_WIDTH*BOARD_HEIGHT
+constexpr int BOARD_WIDTH = 8;
+constexpr int BOARD_HEIGHT = 8;
+constexpr int BOARD_SQUARES = BOARD_WIDTH*BOARD_HEIGHT;
 
 enum node_type_t {PV_NODE = 1, CUT_NODE = 2, ALL_NODE = 3};
 

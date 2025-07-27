@@ -150,6 +150,7 @@ int get_king_bucket_configuration(training_position &pos)
 void loss(float pred, float target, float &loss, float &loss_delta)
 {
     constexpr float exponent = 2.5f;
+    //constexpr float exponent = 2.0f;
 
     //Loss = (pred - target)^exponent
     //DLoss = exponent*(pred - target)^(exponent-1)
@@ -231,7 +232,9 @@ struct worker_thread
                 float loss       = loss_eval       * (1.0f-lambda) + loss_result       * lambda;
                 float loss_delta = loss_eval_delta * (1.0f-lambda) + loss_result_delta * lambda;
 
-                back_propagate(net, gradient, loss_delta, sample.get_turn());
+                float sigmoid_delta = pred * (1.0f - pred);
+
+                back_propagate(net, gradient, loss_delta*sigmoid_delta, sample.get_turn());
 
                 cost += loss;
             }
@@ -478,10 +481,15 @@ void training_loop(std::string net_file, std::string qnet_file, std::shared_ptr<
 
     training_network net(weights);
 
+
+    //weights->perspective_weights.coalesce_factorizer_weights();
+    //net.use_factorizer = false;
+
+
     float learning_rate = 0.0001f;
     float beta1 = 0.9f;
     float beta2 = 0.995f;
-    int batch_size = 16000*thread_pool.get_pool_size();
+    int batch_size = 8000*thread_pool.get_pool_size();
     int epoch_size = 100000000;
     float min_lambda = 0.25f;
     float max_lambda = 0.50f;
@@ -572,10 +580,6 @@ void nnue_trainer::train(std::string net_file, std::string qnet_file, std::vecto
 
     init_weights(*weights, true);
     weights->load_file(net_file);
-
-
-    //weights->load_file("netkb16d_2.nnue");
-    //init_weights(*weights, false);
 
     training_loop(net_file, qnet_file, weights, reader);
 }

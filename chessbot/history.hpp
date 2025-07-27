@@ -6,7 +6,6 @@ constexpr int32_t correction_history_grain = 512;
 constexpr int32_t correction_pawn_table_size = 16384;
 constexpr int32_t correction_material_table_size = 2048;
 constexpr int32_t correction_clamp = 100;
-constexpr int32_t pawn_history_size = 2048;
 
 struct piece_square_history
 {
@@ -226,7 +225,7 @@ struct history_heurestic_table
     chess_move counter_moves[16][BOARD_HEIGHT*BOARD_WIDTH];
     chess_move killer_moves[MAX_DEPTH][KILLER_MOVE_SLOTS];
 
-    bool experimental_features;
+    bool test_flag;
 };
 
 

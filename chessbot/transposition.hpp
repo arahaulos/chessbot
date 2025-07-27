@@ -179,7 +179,7 @@ struct tt_bucket
         return used;
     }
 
-    bool read(const board_state &state, const uint64_t &zhash, chess_move &bm, int &d, int &t, int32_t &e, int32_t &se, int ply) const {
+    bool probe(const board_state &state, const uint64_t &zhash, chess_move &bm, int &d, int &t, int32_t &e, int32_t &se, int ply) const {
 
         tt_bucket buck;
         memcpy(&buck, this, sizeof(tt_bucket));
@@ -195,7 +195,7 @@ struct tt_bucket
         return false;
     }
 
-    void write(const uint64_t &zhash, chess_move bm, int d, int t, int32_t e, int32_t se, int ply, int current_age) {
+    void store(const uint64_t &zhash, chess_move bm, int d, int t, int32_t e, int32_t se, int ply, int current_age) {
 
         tt_entry new_entry;
         new_entry.encode(zhash, bm, d, t, e, se, ply, current_age);

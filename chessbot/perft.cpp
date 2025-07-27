@@ -121,7 +121,7 @@ uint64_t perft::debug_perft(board_state &state, int depth, int ply, search_conte
     chess_move tt_move = chess_move::null_move();
     int tt_node_type;
     int32_t tt_static_eval;
-    bool tt_hit = test_perft_tt[state.zhash].read(state, state.zhash, tt_move, tt_depth, tt_node_type, tt_score, tt_static_eval, 0);
+    bool tt_hit = test_perft_tt[state.zhash].probe(state, state.zhash, tt_move, tt_depth, tt_node_type, tt_score, tt_static_eval, 0);
 
     if (tt_hit && tt_depth == depth) {
         sc.stats.cache_hits += 1;
@@ -202,7 +202,7 @@ uint64_t perft::debug_perft(board_state &state, int depth, int ply, search_conte
     sc.history.update(best_move, depth, ply, picker.picked_quiet_moves, picker.picked_quiet_count, picker.picked_captures, picker.picked_capture_count);
 
     if (total < 32000) {
-        test_perft_tt[state.zhash].write(state.zhash, best_move, depth, ALL_NODE, total, total, 0, cache_age);
+        test_perft_tt[state.zhash].store(state.zhash, best_move, depth, ALL_NODE, total, total, 0, cache_age);
     }
 
     return total;

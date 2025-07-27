@@ -111,10 +111,7 @@ struct search_params
     static int num_of_params() {
         return sizeof(search_params) / sizeof(int);
     }
-
-
 };
-
 
 struct search_statistics
 {
@@ -212,6 +209,16 @@ struct pv_table
     }
 };
 
+struct search_info
+{
+    int depth;
+    int seldepth;
+
+    std::vector<std::shared_ptr<pv_table>> lines;
+    uint64_t time_ms;
+    uint64_t nodes;
+};
+
 struct search_context
 {
     search_context(std::shared_ptr<nnue_weights> shared_weights) {
@@ -258,6 +265,7 @@ struct search_context
 
     piece_square_history *conthist[MAX_DEPTH];
     chess_move moves[MAX_DEPTH];
+
     int32_t static_eval[MAX_DEPTH];
 
     history_heurestic_table history;
@@ -323,15 +331,58 @@ public:
     int32_t get_transpostion_table_usage_permill();
 
     uint64_t get_node_count() {
-        return total_nodes_searched;
-    }
-    int get_max_depth_reached() {
-        return max_depth_reached;
+        info_lock.lock();
+        int n = search_infos.back().nodes;
+        info_lock.unlock();
+        return n;
     }
 
-    chess_move get_move(int pv_num);
-    int32_t get_evaluation(int pv_num);
-    void get_pv(pv_table &pv_out, int pv_num);
+    int get_max_depth_reached() {
+        info_lock.lock();
+        int sd = search_infos.back().seldepth;
+        info_lock.unlock();
+        return sd;
+    }
+
+    chess_move get_move(int pv_num)
+    {
+        chess_move p;
+        info_lock.lock();
+        p = search_infos.back().lines[pv_num]->moves[0];
+        info_lock.unlock();
+        return p;
+    }
+
+    int32_t get_evaluation(int pv_num)
+    {
+        int32_t e;
+        info_lock.lock();
+        e = search_infos.back().lines[pv_num]->score;
+        info_lock.unlock();
+        return e;
+    }
+
+    void get_pv(pv_table &pv_out, int pv_num)
+    {
+        info_lock.lock();
+        pv_out = *search_infos.back().lines[pv_num];
+        info_lock.unlock();
+    }
+
+    int32_t get_depth()
+    {
+        info_lock.lock();
+        int depth = search_infos.back().depth;
+        info_lock.unlock();
+        return depth;
+    }
+
+    void limit_search(int depth, int nodes)
+    {
+        min_depth = depth;
+        limit_nodes = nodes;
+    }
+
 
     chess_move get_move() {
         return get_move(0);
@@ -346,7 +397,6 @@ public:
     uint64_t get_nps() {
         return nps;
     }
-    int32_t get_depth();
 
     bool is_searching() {
         return searching_flag;
@@ -355,7 +405,16 @@ public:
         return ready_flag;
     }
 
-    bool experimental_features;
+    search_info get_search_info(int depth)
+    {
+        search_info info;
+        info_lock.lock();
+        info = search_infos[depth-1];
+        info_lock.unlock();
+        return info;
+    }
+
+    bool test_flag;
     bool use_opening_book;
 
     chess_move fast_search(board_state &state, int depth, int max_nodes);
@@ -384,15 +443,13 @@ private:
 
     int number_of_helper_threads;
     int nominal_search_depth;
-
     uint32_t current_cache_age;
+
     uint64_t nps;
-    uint64_t total_nodes_searched;
-    int max_depth_reached;
 
     std::chrono::high_resolution_clock::time_point search_begin_time;
 
-    cache<tt_bucket, TT_SIZE> move_cache;
+    cache<tt_bucket, TT_SIZE> transposition_table;
     cache<eval_table_entry, EVAL_CACHE_SIZE> eval_cache;
 
     opening_book book;
@@ -403,17 +460,13 @@ private:
     std::vector<std::thread> helper_threads;
     std::vector<std::unique_ptr<search_context>> thread_datas;
 
-    int best_move_depth;
-    pv_table best_pv[MAX_MULTI_PV];
+    int num_of_pvs;
     pv_table root_search_pv[MAX_MULTI_PV];
     std::mutex root_search_lock;
-    std::mutex best_move_lock;
 
     std::atomic<bool> searching_flag;
     std::atomic<bool> alphabeta_abort_flag;
     std::atomic<bool> ready_flag;
-
-    int num_of_pvs;
 
     search_statistics all_threads_stats;
 
@@ -424,7 +477,11 @@ private:
 
     int limit_nodes;
     int min_depth;
+
+    std::mutex info_lock;
+    std::vector<search_info> search_infos;
 };
+
 
 std::string eval_to_str(int32_t score);
 

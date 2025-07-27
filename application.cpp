@@ -108,8 +108,6 @@ int application::test_incremental_updates()
             }
         }
 
-
-
         uint64_t zhash0 = game->get_state().zhash;
         uint64_t zhash1 = hashgen.get_hash(game->get_state(), game->get_state().get_turn());
 

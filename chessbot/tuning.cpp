@@ -135,7 +135,7 @@ void selfplay_worker::play(std::atomic<int> &games, int d, int n, bool random, s
         game_win_type_t win_status = NO_WIN;
         game_win_type_t mate_found_win = NO_WIN;
 
-        int random_moves = (random ? 6 + (std::rand() % 8) : 14);
+        int random_moves = (random ? 6 + (std::rand() % 8) : 16);
 
         double total_depth = 0;
         int searched_moves = 0;
@@ -147,8 +147,8 @@ void selfplay_worker::play(std::atomic<int> &games, int d, int n, bool random, s
                 if (random) {
                     acceptable_moves = game.get_state().get_all_legal_moves(game.get_state().get_turn());
                 } else {
-                    constexpr int multipv = 4;
-                    constexpr int max_cp_loss = 100;
+                    constexpr int multipv = 5;
+                    constexpr int max_cp_loss = 120;
 
                     if (bot->get_multi_pv() != multipv) {
                         bot->set_multi_pv(multipv);
