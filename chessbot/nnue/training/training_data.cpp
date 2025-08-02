@@ -294,7 +294,7 @@ void training_batch_manager::load_epoch(training_position *buffer)
 
     size_t fetch_index = 0;
 
-    size_t chunk_size = 1024*1024*16;
+    size_t chunk_size = 1024*1024*64;
     std::vector<training_position> chunk(chunk_size);
 
     size_t read_index = 0;

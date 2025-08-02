@@ -227,17 +227,3 @@ struct history_heurestic_table
 
     bool test_flag;
 };
-
-
-
-
-
-
-
-
-
-
-
-
-
-

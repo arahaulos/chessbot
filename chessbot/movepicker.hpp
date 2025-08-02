@@ -145,10 +145,8 @@ struct move_picker
 
     int32_t get_threats_score(chess_move mov)
     {
-        constexpr int32_t minor_pawn_threat_value = 8000;
-
-        constexpr int32_t major_pawn_threat_value = 16000;
-        constexpr int32_t major_minor_threat_value = 8000;
+        constexpr int32_t minor_threat_value = 6000;
+        constexpr int32_t major_threat_value = 12000;
 
         constexpr int32_t null_move_escape_value = 8000;
 
@@ -160,37 +158,23 @@ struct move_picker
         int32_t score = 0;
 
         if (moving.get_type() == BISHOP || moving.get_type() == KNIGHT) {
-            bool escape_from_pawn = state->is_square_threatened_by_pawn(mov.from, moving.get_player());
-            bool pawn_can_capture = state->is_square_threatened_by_pawn(mov.to, moving.get_player());
-
-            if (escape_from_pawn) {
-                score += minor_pawn_threat_value;
+            if (state->is_square_threatened_by_pawn(mov.from, moving.get_player())) {
+                score += minor_threat_value;
             }
-            if (pawn_can_capture) {
-                score -= minor_pawn_threat_value;
+            if (state->is_square_threatened_by_pawn(mov.to, moving.get_player())) {
+                score -= minor_threat_value;
             }
-
         } else if (moving.get_type() == ROOK || moving.get_type() == QUEEN) {
-            bool escape_from_pawn = state->is_square_threatened_by_pawn(mov.from, moving.get_player());
-            bool escape_from_minor = state->is_square_threatened_by_minor(mov.from, moving.get_player());
-
-            bool pawn_can_capture = state->is_square_threatened_by_pawn(mov.to, moving.get_player());
-            bool minor_can_capture = state->is_square_threatened_by_minor(mov.to, moving.get_player());
-
-            if (escape_from_pawn) {
-                score += major_pawn_threat_value;
+            if (state->is_square_threatened_by_pawn(mov.from, moving.get_player()) ||
+                state->is_square_threatened_by_minor(mov.from, moving.get_player())) {
+                score += major_threat_value;
             }
-            if (pawn_can_capture) {
-                score -= major_pawn_threat_value;
-            }
-
-            if (escape_from_minor) {
-                score += major_minor_threat_value;
-            }
-            if (minor_can_capture) {
-                score -= major_minor_threat_value;
+            if (state->is_square_threatened_by_pawn(mov.to, moving.get_player()) ||
+                state->is_square_threatened_by_minor(mov.to, moving.get_player())) {
+                score -= major_threat_value;
             }
         }
+
 
         if (score >= 0) {
             uint_fast8_t opponent_color = (moving.get_player() == WHITE);
@@ -217,7 +201,6 @@ struct move_picker
                 score += king_attack_bonus;
             }
         }
-
         if (threat_move.valid()) {
             if (mov.from == threat_move.to) {
                 //Escaping capture which caused cut-off in nullmove pruning search
@@ -445,20 +428,3 @@ private:
 
     bool test_flag;
 };
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

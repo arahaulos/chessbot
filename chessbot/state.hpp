@@ -171,6 +171,10 @@ struct chess_move
         return ((encoded_pieces & 0xF) != 0);
     }
 
+    bool is_promotion() const {
+        return (promotion != EMPTY);
+    }
+
     inline bool operator == (const chess_move &other) const {
         return (from == other.from && to == other.to && promotion == other.promotion);
     }
@@ -425,7 +429,7 @@ public:
     bool is_square_threatened_by_pawn(const square_index &pos, const player_type_t &player) const {
         bool color = (player == BLACK);
 
-        bitboard pawn_attack = bitboard_utils.pawn_attack(pos.index, 0, color, ~((uint64_t)0), 0);
+        bitboard pawn_attack = bitboard_utils.pawn_attack(pos.index, ~((uint64_t)0), color, ~((uint64_t)0), 0);
 
         return ((pawn_attack & bitboards[PAWN][!color]) != 0);
     }
@@ -456,45 +460,45 @@ public:
                 ((queen_style & bitboards[QUEEN][!color]) != 0));
     }
 
-
     bool is_square_threatened_by_lesser(square_index pos, player_type_t player, piece_type_t piece) const {
         bool color = (player == BLACK);
-        bitboard occupation = pieces_by_color[0] | pieces_by_color[1];
-
-        bitboard bishop_style = bitboard_utils.bishop_attack(pos.index, occupation, ~(uint64_t)0);
-        bitboard rook_style = bitboard_utils.rook_attack(pos.index, occupation, ~(uint64_t)0);
-        bitboard knight_style = bitboard_utils.knight_attack(pos.index, ~(uint64_t)0);
-        bitboard pawn_style = bitboard_utils.pawn_attack(pos.index, occupation, color, ~(uint64_t)0, 0);
-
-        switch (piece)
-        {
-        case KING:
-            if (((bishop_style | rook_style) & bitboards[QUEEN][!color]) != 0) {
-                return true;
-            }
-        case QUEEN:
-            if ((rook_style & bitboards[ROOK][!color]) != 0) {
-                return true;
-            }
-        case ROOK:
-            if ((bishop_style & bitboards[BISHOP][!color]) != 0) {
-                return true;
-            }
-        case BISHOP:
-            if ((knight_style & bitboards[KNIGHT][!color]) != 0) {
-                return true;
-            }
-        case KNIGHT:
-            if ((pawn_style & bitboards[PAWN][!color]) != 0) {
-                return true;
-            }
-        case PAWN:
+        if (piece == PAWN) {
             return false;
-        case EMPTY:
-            return false;
+        } else if (piece <= BISHOP) {
+            bitboard pawn_style = bitboard_utils.pawn_attack(pos.index, ~(uint64_t)0, color, ~(uint64_t)0, 0);
+            return ((pawn_style & bitboards[PAWN][!color]) != 0);
+        } else {
+            bitboard occupation = pieces_by_color[0] | pieces_by_color[1];
+
+            bitboard knight_style = bitboard_utils.knight_attack(pos.index, ~(uint64_t)0);
+            bitboard pawn_style = bitboard_utils.pawn_attack(pos.index, occupation, color, ~(uint64_t)0, 0);
+            bitboard bishop_style = bitboard_utils.bishop_attack(pos.index, occupation, ~(uint64_t)0);
+
+            if ((pawn_style & bitboards[PAWN][!color]) != 0 ||
+                (knight_style & bitboards[KNIGHT][!color]) != 0 ||
+                (bishop_style & bitboards[BISHOP][!color]) != 0) {
+                return true;
+            }
+
+            bitboard rook_style = bitboard_utils.rook_attack(pos.index, occupation, ~(uint64_t)0);
+
+            switch (piece)
+            {
+            case KING:
+                if (((bishop_style | rook_style) & bitboards[QUEEN][!color]) != 0) {
+                    return true;
+                }
+            case QUEEN:
+                if ((rook_style & bitboards[ROOK][!color]) != 0) {
+                    return true;
+                }
+            default:
+                return false;
+            }
         }
-    }
 
+        return false;
+    }
 
     bool in_check(player_type_t player) const {
         if (player == WHITE) {

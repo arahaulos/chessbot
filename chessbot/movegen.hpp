@@ -381,6 +381,7 @@ struct move_generator
     static int generate_killer_moves(const board_state &state, history_heurestic_table &history_table, int ply, chess_move *movelist)
     {
         int c = history_table.get_killers(movelist, ply);
+
         for (int i = 0; i < c; i++) {
             bool dublicate = false;
             for (int j = 0; j < i; j++) {

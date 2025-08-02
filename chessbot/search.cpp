@@ -290,6 +290,15 @@ void alphabeta_search::iterative_search(int max_depth)
 
         std::chrono::high_resolution_clock::time_point t3 = std::chrono::high_resolution_clock::now();
 
+        auto ms = std::chrono::duration_cast<std::chrono::milliseconds>( t3 - t2 );
+
+        uint64_t nodes = all_threads_stats.nodes - total_nodes_searched;
+
+        nps = (nodes*1000) / (ms.count()+1);
+
+        total_nodes_searched = all_threads_stats.nodes;
+
+
         if (!searching_flag || (limit_nodes != 0 && all_threads_stats.nodes > limit_nodes && depth >= min_depth)) {
             break;
         } else {
@@ -299,20 +308,15 @@ void alphabeta_search::iterative_search(int max_depth)
                 }
             }
 
-            auto ms = std::chrono::duration_cast<std::chrono::milliseconds>( t3 - t2 );
-
-            uint64_t nodes = all_threads_stats.nodes - total_nodes_searched;
-
-            nps = (nodes*1000) / (ms.count()+1);
-
-            total_nodes_searched = all_threads_stats.nodes;
-
             depth += 1;
         }
     }
 
-    total_nodes_searched = all_threads_stats.nodes;
     ready_flag = true;
+
+    /*if (all_threads_stats.tempo_samples > 0) {
+        std::cout << all_threads_stats.avg_tempo / all_threads_stats.tempo_samples << std::endl;
+    }*/
 }
 
 void alphabeta_search::start_helper_threads(int32_t window_alpha, int32_t window_beta, int depth)
@@ -627,8 +631,7 @@ int32_t alphabeta_search::alphabeta(board_state &state, int32_t alpha, int32_t b
     //Reverse futility pruning
     //If evaluation is good enough at shallow depth, we prune
     int32_t rfmargin = std::max(0, sp.rfmargin_base + sp.rfmargin_mult*depth - (improving ? sp.rfmargin_improving_modifier : 0));
-    if (!is_pv &&
-        is_cut &&
+    if (is_cut &&
         !in_check &&
         depth < 6 &&
         ply > 2 &&
@@ -721,20 +724,32 @@ int32_t alphabeta_search::alphabeta(board_state &state, int32_t alpha, int32_t b
         int32_t singular_beta = tt_score - (2*depth);
         int32_t score = alphabeta(state, singular_beta-1, singular_beta, depth / 2, ply, sc, line, &tt_move, (is_cut ? CUT_NODE : ALL_NODE));
 
-        if (score < singular_beta) {
-            //Singular extension
-            //TT move is better than rest of the moves. This node is singular and should be searcher with more carefully
-            tt_move_extensions += 1 + (score + 10*depth < tt_score);
-        } else if (singular_beta >= beta && !is_mate_score(score) && !is_pv) {
-            //Multicut
-            //We have proved that there is multiple moves that fails-high in this node
-            //Changes that deeper search doesn't fail high is very low
-            return score;
-        } else if (tt_score >= beta && !is_pv) {
-            //Singular beta wasn't enough high to get cut-off. Other moves are also good.
-            tt_move_extensions -= 2;
-        } else if (is_cut || is_pv) {
-            tt_move_extensions -= 1;
+        if (is_pv) {
+            if (score < singular_beta) {
+                //Singular extension
+                //TT move is better than rest of the moves. This node is singular and should be searcher with more carefully
+                tt_move_extensions += 1;
+            } else if (singular_beta > alpha && tt_score < beta) {
+                //There is other moves that might beat alpha. Lets extend them (by reducing tt move)
+                tt_move_extensions -= 1;
+            }
+        } else {
+            if (score < singular_beta) {
+                //Singular extension
+                //TT move is better than rest of the moves. This node is singular and should be searcher with more carefully
+                tt_move_extensions += 1 + (score + 10*depth < tt_score);
+            } else if (singular_beta >= beta && !is_mate_score(score)) {
+                //Multicut
+                //There is multiple moves that fails-high in this node
+                //Changes that deeper search doesn't fail high is low
+                return score;
+            } else if (tt_score >= beta) {
+                //Singular beta wasn't enough high to get cut-off
+                tt_move_extensions -= 2;
+            } else if (is_cut) {
+                //TT move is not supposed to fail high at expected cut node. Lets extend other moves
+                tt_move_extensions -= 1;
+            }
         }
     }
 
@@ -762,8 +777,7 @@ int32_t alphabeta_search::alphabeta(board_state &state, int32_t alpha, int32_t b
 
         int32_t history_score = (is_capture ? sc.history.get_capture_history(mov) : sc.history.get_quiet_history(ply, mov));
 
-        reductions -= (history_score / sp.lmr_hist_adjust);
-
+        reductions -= history_score / sp.lmr_hist_adjust;
 
         //Forward pruning at low depth
         if (best_score != MIN_EVAL && !is_mate_score(best_score) && ply > 2) {
@@ -802,7 +816,7 @@ int32_t alphabeta_search::alphabeta(board_state &state, int32_t alpha, int32_t b
             } else {
                 //SEE pruning. If capture SEE is below treshold, skip capture
                 int32_t see_treshold = -d * sp.see_margin_mult;
-                if (d < 6 && !is_pv && static_exchange_evaluation(state, mov) < see_treshold) {
+                if (!is_pv && d < 6 && static_exchange_evaluation(state, mov) < see_treshold) {
                     prune = true;
                 }
             }
@@ -1052,7 +1066,7 @@ int32_t alphabeta_search::quisearch(board_state &state, int32_t alpha, int32_t b
 
         //SEE pruning
         //Captures with negative SEE have very little changes to increase evaluation
-        if (see < 0 && !in_check && legal_moves > 1) {
+        if (see < 0 && !in_check) {
             break;
         }
 

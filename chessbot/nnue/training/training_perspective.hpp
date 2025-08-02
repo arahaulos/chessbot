@@ -298,6 +298,7 @@ struct training_perspective
 
     void back_propagate(training_perspective_weights<INPUTS, NEURONS> *gradients) {
         __m256 zero = _mm256_set1_ps(0.0f);
+        //__m256 zero = _mm256_set1_ps(0.01f);
         __m256 one = _mm256_set1_ps(1.0f);
 
         __m256 half = _mm256_set1_ps(0.5f);

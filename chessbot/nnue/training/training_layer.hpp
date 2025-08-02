@@ -80,6 +80,7 @@ inline float activation_diff(float x)
 {
     if (x < 0.0f || x > 1.0f) {
         return 0.0f;
+        //return 0.01f;
     } else {
         return 1.0f;
     }
@@ -94,6 +95,7 @@ inline float activation_diff_out(float x)
 inline float activation_func(float x)
 {
     return std::clamp(x, 0.0f, 1.0f);
+    //return std::clamp(x, 0.01f*x, 1.0f + (x - 1.0f)*0.01f);
 }
 
 inline float activation_func_out(float x)

@@ -145,10 +145,6 @@ void training_weights::load_file(std::string path)
 {
     std::ifstream file(path.c_str(), std::ios::binary);
     if (file.is_open()) {
-        file.seekg(0, std::ios::end);
-        size_t s = file.tellg();
-        file.seekg(0, std::ios::beg);
-
         perspective_weights.load(file);
         output_weights.load(file);
     }

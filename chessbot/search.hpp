@@ -142,6 +142,9 @@ struct search_statistics
         avg_se_diff += other.avg_se_diff;
         se_diff_samples += other.se_diff_samples;
 
+        avg_tempo += other.avg_tempo;
+        tempo_samples += other.tempo_samples;
+
         max_distance_to_root = std::max(max_distance_to_root, other.max_distance_to_root);
     }
 
@@ -167,6 +170,9 @@ struct search_statistics
 
     int64_t avg_se_diff;
     int64_t se_diff_samples;
+
+    int64_t avg_tempo;
+    int64_t tempo_samples;
 };
 
 struct pv_table
