@@ -247,7 +247,7 @@ void alphabeta_search::iterative_search(int max_depth)
 
     chess_move book_move = book.get_book_move(state_to_search);
 
-    if ((book_move.valid() && use_opening_book) || legal_moves.size() == 1) {
+    if ((book_move.valid() && use_opening_book) /*|| legal_moves.size() == 1*/) {
         info_lock.lock();
 
         search_info info;
@@ -303,7 +303,7 @@ void alphabeta_search::iterative_search(int max_depth)
             break;
         } else {
             if (time_man) {
-                if (time_man->end_of_iteration(depth, get_move(), get_evaluation(), get_search_time_ms())) {
+                if (time_man->end_of_iteration(depth, get_move(), get_evaluation(), get_search_time_ms()) || root_moves.size() == 1) {
                     ready_flag = true;
                 }
             }
@@ -587,11 +587,9 @@ int32_t alphabeta_search::alphabeta(board_state &state, int32_t alpha, int32_t b
         state.half_move_clock < 90)
     {
         sc.static_eval[ply] = tt_static_eval;
+        sc.moves[ply] = tt_move; //if previous move was null move, move which caused cut-off is threat move
 
         if (tt_node_type == CUT_NODE && tt_score >= beta) {
-
-            sc.moves[ply] = tt_move; //if previous move was null move, move which caused cut-off is threat move
-
             return tt_score;
         } else if (tt_node_type == ALL_NODE && tt_score <= alpha) {
             return tt_score;
@@ -732,11 +730,12 @@ int32_t alphabeta_search::alphabeta(board_state &state, int32_t alpha, int32_t b
             } else if (singular_beta > alpha && tt_score < beta) {
                 //There is other moves that might beat alpha. Lets extend them (by reducing tt move)
                 tt_move_extensions -= 1;
+                if (ply+depth < nominal_search_depth-3) {
+                    depth += 1; //Depth shouldn't get too much below nominal search depth
+                }
             }
         } else {
             if (score < singular_beta) {
-                //Singular extension
-                //TT move is better than rest of the moves. This node is singular and should be searcher with more carefully
                 tt_move_extensions += 1 + (score + 10*depth < tt_score);
             } else if (singular_beta >= beta && !is_mate_score(score)) {
                 //Multicut
@@ -744,10 +743,8 @@ int32_t alphabeta_search::alphabeta(board_state &state, int32_t alpha, int32_t b
                 //Changes that deeper search doesn't fail high is low
                 return score;
             } else if (tt_score >= beta) {
-                //Singular beta wasn't enough high to get cut-off
                 tt_move_extensions -= 2;
             } else if (is_cut) {
-                //TT move is not supposed to fail high at expected cut node. Lets extend other moves
                 tt_move_extensions -= 1;
             }
         }

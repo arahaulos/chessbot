@@ -296,6 +296,7 @@ struct move_picker
                     return TT_MOVE;
                 }
                 stage = GOOD_CAPTURE_MOVE;
+
             case GOOD_CAPTURE_MOVE:
 
                 if (!captures_generated) {

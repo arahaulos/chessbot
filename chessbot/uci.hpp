@@ -59,6 +59,8 @@ private:
 
     bool get_command(std::string &str_out);
 
+    void send_info_strings(int search_time);
+
 
     void update();
 

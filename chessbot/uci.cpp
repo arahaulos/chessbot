@@ -303,13 +303,8 @@ void uci_interface::execute_command(std::string cmd_line)
 }
 
 
-void uci_interface::update()
+void uci_interface::send_info_strings(int search_time)
 {
-    if (!ginfo.active) {
-        return;
-    }
-
-    int search_time = search_instance->get_search_time_ms();
     int latest_depth = search_instance->get_depth();
     if (latest_depth != last_info_depth) {
 
@@ -376,10 +371,25 @@ void uci_interface::update()
         }
         last_info_depth = latest_depth;
     }
+}
+
+
+void uci_interface::update()
+{
+    if (!ginfo.active) {
+        return;
+    }
+
+    int search_time = search_instance->get_search_time_ms();
+
+    send_info_strings(search_time);
 
 
     if (search_instance->is_ready_to_stop()) {
         search_instance->stop_search();
+
+        send_info_strings(search_time);
+
         send_command("bestmove " + search_instance->get_move().to_uci());
         ginfo.active = false;
 

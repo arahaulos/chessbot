@@ -30,8 +30,8 @@ int main()
     /*std::unique_ptr<alphabeta_search> bot0 = std::make_unique<alphabeta_search>();
     std::unique_ptr<alphabeta_search> bot1 = std::make_unique<alphabeta_search>();
 
-    //bot0->load_nnue_net("qnetkb16d3_11.nnue");
-    //bot1->load_nnue_net("embedded_weights.nnue");
+    bot0->load_nnue_net("qnetkb16d3_11.nnue");
+    bot1->load_nnue_net("embedded_weights.nnue");
     bot0->set_threads(1);
     bot1->set_threads(1);
     bot0->use_opening_book = true;
@@ -39,7 +39,7 @@ int main()
     bot0->test_flag = true;
     bot1->test_flag = false;
 
-    tuning_utility::test(100000, 1000, 100, *bot0, *bot1, 16, "", 0.0, 3.0f);
+    tuning_utility::test(100000, 1000, 100, *bot0, *bot1, 16, "", 0.0, 5.0f);
     //tuning_utility::test(20000, 16000, 1000, *bot0, *bot1, 16, "builds/1_4_25/chessbot.exe", 0.0f, 5.0f);
     //*/
 
