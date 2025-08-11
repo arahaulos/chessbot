@@ -845,7 +845,7 @@ struct tuner_worker
             int value = local_params.data[param];
             int range = max_value - min_value;
 
-            int delta = std::max(5, range/16);
+            int delta = std::max(4, range/16);
 
             float smaller_value = std::clamp(value - delta, min_value, max_value);
             float bigger_value = std::clamp(value + delta, min_value, max_value);

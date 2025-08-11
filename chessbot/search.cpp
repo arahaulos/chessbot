@@ -424,6 +424,7 @@ void alphabeta_search::search_root(int32_t window_alpha, int32_t window_beta, in
     sc.stats.reset();
     sc.history.test_flag = test_flag;
     sc.static_eval[0] = static_evaluation(sc.state, sc.state.get_turn(), sc.stats);
+    sc.reduction[0] = 0;
     sc.main_thread = (thread_id == 0);
 
     pv_table root_pv[MAX_MULTI_PV];
@@ -586,8 +587,8 @@ int32_t alphabeta_search::alphabeta(board_state &state, int32_t alpha, int32_t b
         tt_depth >= depth &&
         state.half_move_clock < 90)
     {
-        sc.static_eval[ply] = tt_static_eval;
-        sc.moves[ply] = tt_move; //if previous move was null move, move which caused cut-off is threat move
+        //if previous move was null move, move which caused cut-off is threat move
+        sc.moves[ply] = tt_move;
 
         if (tt_node_type == CUT_NODE && tt_score >= beta) {
             return tt_score;
@@ -596,6 +597,7 @@ int32_t alphabeta_search::alphabeta(board_state &state, int32_t alpha, int32_t b
         }
     }
 
+    bool in_check = state.in_check(state.get_turn());
     int32_t raw_eval = (tt_hit ? tt_static_eval : static_evaluation(state, state.get_turn(), sc.stats));
     int32_t static_eval = raw_eval + sc.history.get_correction_history(state);
     int32_t eval = static_eval;
@@ -609,22 +611,32 @@ int32_t alphabeta_search::alphabeta(board_state &state, int32_t alpha, int32_t b
     }
 
     bool improving = false;
+    if (ply >= 2 && sc.static_eval[ply-2] != MIN_EVAL) {
+        improving = (static_eval >= sc.static_eval[ply-2]);
+    } else if (ply >= 4 && sc.static_eval[ply-4] != MIN_EVAL) {
+        improving = (static_eval >= sc.static_eval[ply-4]);
+    }
 
-    if (ply >= 2) {
-        if (sc.static_eval[ply-2] == MIN_EVAL) {
-            if (ply >= 4 && sc.static_eval[ply-4] != MIN_EVAL) {
-                improving = (static_eval > sc.static_eval[ply-4]);
-            }
-        } else {
-            improving = (static_eval > sc.static_eval[ply-2]);
+    sc.static_eval[ply] = (in_check ? MIN_EVAL : static_eval); //NNUE is not trained check positions
+    sc.reduction[ply] = 0;
+    sc.history.reset_killers(ply+2);
+
+    pv_table line;
+
+    if (sc.reduction[ply-1] > 0) {
+        //Adjust LMR based on static evaluation difference
+        //Idea of LMR is reduce more bad moves and less good moves
+        //Static evaluation difference gives some hint about move quality
+        if (static_eval < -sc.static_eval[ply-1]) {
+            depth++; //Previous move was good for opponent (bad for current STM), lets decrease reduction
+            sc.reduction[ply-1]--;
+        } else if (depth > 2 && static_eval - (-sc.static_eval[ply-1]) > 120 && skip_move == nullptr) {
+            depth--; //Previous move was bad for opponent, lets increase reduction
+            sc.reduction[ply-1]++;
         }
     }
 
-    bool in_check = state.in_check(state.get_turn());
 
-    sc.static_eval[ply] = (in_check ? MIN_EVAL : static_eval); //NNUE is not trained check positions
-    sc.history.reset_killers(ply+2);
-    pv_table line;
 
     //Reverse futility pruning
     //If evaluation is good enough at shallow depth, we prune
@@ -676,12 +688,14 @@ int32_t alphabeta_search::alphabeta(board_state &state, int32_t alpha, int32_t b
             if (depth > 8) {
                 //NMP vertification search
                 int restore_min_nmp_ply = sc.min_nmp_ply;
+                int restore_prior_reduction = sc.reduction[ply-1];
 
                 sc.min_nmp_ply = ply + ((nmp_depth * 3) / 4) + 1;
 
                 int32_t score = alphabeta(state, beta-1, beta, nmp_depth, ply, sc, line, nullptr, ALL_NODE);
 
                 sc.min_nmp_ply = restore_min_nmp_ply;
+                sc.reduction[ply-1] = restore_prior_reduction;
 
                 if (score >= beta) {
                     return std::min(null_score, score);
@@ -696,6 +710,8 @@ int32_t alphabeta_search::alphabeta(board_state &state, int32_t alpha, int32_t b
         }
     }
 
+    //Razoring
+    //If eval is below alpha with big margin and qsearch doesnt reveal easy capture which saves evaluation, node gets pruned
     int32_t razoring_margin = sp.razoring_margin*depth;
     if (!is_pv && !in_check && depth < 5 && eval + razoring_margin < alpha) {
         int score = quisearch(state, alpha, beta, ply, sc, false);
@@ -705,7 +721,7 @@ int32_t alphabeta_search::alphabeta(board_state &state, int32_t alpha, int32_t b
     }
 
     //IIR
-    //If this unexplored part of tree proves to be important, there will be tt hits at next search
+    //If this unexplored part of tree proves to be important, there will be tt hits at next time this subtree is searched (next ID iteration or LMR/PVS/Aspiration research)
     if ((is_pv || is_cut) && depth >= 3 && !tt_hit) {
         depth -= 1;
     }
@@ -719,8 +735,12 @@ int32_t alphabeta_search::alphabeta(board_state &state, int32_t alpha, int32_t b
         !is_mate_score(tt_score) &&
         ply + depth < 2*nominal_search_depth)
     {
+        int restore_prior_reduction = sc.reduction[ply-1];
+
         int32_t singular_beta = tt_score - (2*depth);
         int32_t score = alphabeta(state, singular_beta-1, singular_beta, depth / 2, ply, sc, line, &tt_move, (is_cut ? CUT_NODE : ALL_NODE));
+
+        sc.reduction[ply-1] = restore_prior_reduction;
 
         if (is_pv) {
             if (score < singular_beta) {
@@ -866,6 +886,7 @@ int32_t alphabeta_search::alphabeta(board_state &state, int32_t alpha, int32_t b
 
         sc.moves[ply] = mov;
         sc.conthist[ply] = sc.history.get_continuation_history_table(mov);
+        sc.reduction[ply] = (reduced_depth < new_depth ? reductions : 0);
         sc.stats.nodes += 1;
 
         unmove_data restore = state.make_move(mov, next_hash);
@@ -877,7 +898,8 @@ int32_t alphabeta_search::alphabeta(board_state &state, int32_t alpha, int32_t b
                 score = -alphabeta(state, -alpha-1, -alpha, reduced_depth, new_ply, sc, line, nullptr, CUT_NODE);
 
                 //LMR research with full depth
-                if (score > alpha && reduced_depth < new_depth) {
+                if (score > alpha && sc.reduction[ply] > 0) {
+                    sc.reduction[ply] = 0;
                     score = -alphabeta(state, -alpha-1, -alpha, new_depth, new_ply, sc, line, nullptr, CUT_NODE);
                 }
 
@@ -898,7 +920,8 @@ int32_t alphabeta_search::alphabeta(board_state &state, int32_t alpha, int32_t b
 
             score = -alphabeta(state, -alpha-1, -alpha, reduced_depth, new_ply, sc, line, nullptr, child_type);
 
-            if (score > alpha && reduced_depth < new_depth) {
+            if (score > alpha && sc.reduction[ply] > 0) {
+                sc.reduction[ply] = 0;
                 score = -alphabeta(state, -alpha-1, -alpha, new_depth, new_ply, sc, line, nullptr, child_type);
             }
         }
@@ -962,7 +985,6 @@ int32_t alphabeta_search::alphabeta(board_state &state, int32_t alpha, int32_t b
         if (node_type == ALL_NODE && tt_hit) {
             best_move = tt_move;
         }
-
         transposition_table[zhash].store(zhash, best_move, depth, node_type, best_score, raw_eval, ply, current_cache_age);
     }
 

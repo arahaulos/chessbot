@@ -271,7 +271,7 @@ struct search_context
 
     piece_square_history *conthist[MAX_DEPTH];
     chess_move moves[MAX_DEPTH];
-
+    int reduction[MAX_DEPTH];
     int32_t static_eval[MAX_DEPTH];
 
     history_heurestic_table history;

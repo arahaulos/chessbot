@@ -67,6 +67,18 @@ struct history_heurestic_table
         return score;
     }
 
+    int num_of_killers(int ply)
+    {
+        int n = 0;
+        for (int i = 0; i < KILLER_MOVE_SLOTS; i++) {
+            if (killer_moves[ply][i] != chess_move::null_move()) {
+                n++;
+            }
+        }
+        return n;
+    }
+
+
     void update(chess_move bm, int depth, int ply, chess_move *searched_quiets, int searched_quiet_count, chess_move *searched_captures, int searched_capture_count) {
         bool is_capture = bm.is_capture();
 
@@ -83,7 +95,6 @@ struct history_heurestic_table
             }
             killer_moves[ply][0] = bm;
         }
-
 
         if (depth < 4) {
             return;

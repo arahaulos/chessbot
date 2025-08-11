@@ -486,13 +486,13 @@ void training_loop(std::string net_file, std::string qnet_file, std::shared_ptr<
     //net.use_factorizer = false;
 
 
-    float learning_rate = 0.000025f;
+    float learning_rate = 0.0001f;
     float beta1 = 0.9f;
     float beta2 = 0.995f;
-    int batch_size = 8000*thread_pool.get_pool_size();
+    int batch_size = 16000*thread_pool.get_pool_size();
     int epoch_size = 250000000;
-    float min_lambda = 0.25f;
-    float max_lambda = 0.50f;
+    float min_lambda = 0.15f; //0.2
+    float max_lambda = 0.45f; //0.5
 
     training_batch_manager batch_manager(batch_size, epoch_size, dataset);
 
