@@ -19,11 +19,6 @@ struct nnue_perspective_weights
         delete [] biases_buffer;
     }
 
-    void load(std::istream &stream) {
-        stream.read((char*)weights, (NEURONS*INPUTS)*sizeof(int16_t));
-        stream.read((char*)biases, NEURONS*sizeof(int16_t));
-    }
-
     void load(int16_t *data, size_t &index)
     {
         for (size_t i = 0; i < NEURONS*INPUTS; i++) {

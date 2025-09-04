@@ -17,9 +17,37 @@ T* align_ptr(T *buffer_ptr)
 
 
 template <int N>
-inline void add_vectorized(float *ov, const float *av, const float *bv)
+inline void copy_vectorized(float *ov, const float *av, int tid, int tc)
 {
-    for (int i = 0; i < N; i += 8) {
+    if (N < 512) {
+        if (tid == 0) {
+            tc = 1;
+        } else {
+            return;
+        }
+    }
+    int per_thread = N / tc;
+    int start = per_thread * tid;
+
+    for (int i = start; i < start + per_thread; i += 8) {
+        _mm256_store_ps(&ov[i], _mm256_load_ps(&av[i]));
+    }
+}
+
+template <int N>
+inline void add_vectorized(float *ov, const float *av, const float *bv, int tid, int tc)
+{
+    if (N < 512) {
+        if (tid == 0) {
+            tc = 1;
+        } else {
+            return;
+        }
+    }
+    int per_thread = N / tc;
+    int start = per_thread * tid;
+
+    for (int i = start; i < start + per_thread; i += 8) {
         __m256 a = _mm256_load_ps(&av[i]);
         __m256 b = _mm256_load_ps(&bv[i]);
         __m256 o = _mm256_add_ps(a, b);
@@ -28,9 +56,20 @@ inline void add_vectorized(float *ov, const float *av, const float *bv)
 }
 
 template <int N>
-inline void mult_vectorized(float *ov, const float *av, const float *bv)
+inline void mult_vectorized(float *ov, const float *av, const float *bv, int tid, int tc)
 {
-    for (int i = 0; i < N; i += 8) {
+    if (N < 512) {
+        if (tid == 0) {
+            tc = 1;
+        } else {
+            return;
+        }
+    }
+
+    int per_thread = N / tc;
+    int start = per_thread * tid;
+
+    for (int i = start; i < start + per_thread; i += 8) {
         __m256 a = _mm256_load_ps(&av[i]);
         __m256 b = _mm256_load_ps(&bv[i]);
         __m256 o = _mm256_mul_ps(a, b);
@@ -40,11 +79,22 @@ inline void mult_vectorized(float *ov, const float *av, const float *bv)
 
 
 template <int N>
-inline void mult_vectorized(float *ov, const float *av, float value)
+inline void mult_vectorized(float *ov, const float *av, float value, int tid, int tc)
 {
+    if (N < 512) {
+        if (tid == 0) {
+            tc = 1;
+        } else {
+            return;
+        }
+    }
+
+    int per_thread = N / tc;
+    int start = per_thread * tid;
+
     __m256 b = _mm256_set1_ps(value);
 
-    for (int i = 0; i < N; i += 8) {
+    for (int i = start; i < start + per_thread; i += 8) {
         __m256 a = _mm256_load_ps(&av[i]);
         __m256 o = _mm256_mul_ps(a, b);
         _mm256_store_ps(&ov[i], o);
@@ -53,15 +103,54 @@ inline void mult_vectorized(float *ov, const float *av, float value)
 
 
 template <int N>
-inline void set_vectorized(float *ov, float value)
+inline void set_vectorized(float *ov, float value, int tid, int tc)
 {
+    if (N < 512) {
+        if (tid == 0) {
+            tc = 1;
+        } else {
+            return;
+        }
+    }
+
+    int per_thread = N / tc;
+    int start = per_thread * tid;
+
     __m256 v = _mm256_set1_ps(value);
 
-    for (int i = 0; i < N; i += 8) {
+    for (int i = start; i < start + per_thread; i += 8) {
         _mm256_store_ps(&ov[i], v);
     }
 }
 
+
+template <int N>
+inline void ema_vectorized(float *ov, float *av, float val, int tid, int tc)
+{
+    if (N < 512) {
+        if (tid == 0) {
+            tc = 1;
+        } else {
+            return;
+        }
+    }
+
+    int per_thread = N / tc;
+    int start = per_thread * tid;
+
+    __m256 f0 = _mm256_set1_ps(val);
+    __m256 f1 = _mm256_set1_ps(1.0f - val);
+
+    for (int i = start; i < start + per_thread; i += 8) {
+        __m256 a = _mm256_load_ps(&ov[i]);
+        __m256 b = _mm256_load_ps(&av[i]);
+
+        a = _mm256_mul_ps(a, f0);
+        b = _mm256_mul_ps(b, f1);
+
+        _mm256_store_ps(&ov[i], _mm256_add_ps(a, b));
+    }
+}
 
 
 
@@ -126,12 +215,39 @@ struct training_layer_weights
     }
 
     void load(std::istream &stream) {
+        /*float *fw = new float[1024*NEURONS];
+        stream.read((char*)fw, 1024*NEURONS*sizeof(float));
+
+        for (int i = 0; i < INPUTS*NEURONS; i++) {
+            weights[i] = 0;
+        }
+
+        for (int i = 0; i < NEURONS; i++) {
+            for (int j = 0; j < 1024; j++) {
+
+                int nj = (j < 512 ? j : j + 256);
+
+                weights[i*INPUTS + nj] = fw[i*1024 + j];
+            }
+        }
+        delete [] fw;*/
+
         stream.read((char*)weights, (NEURONS*INPUTS)*sizeof(float));
         stream.read((char*)biases, NEURONS*sizeof(float));
     }
 
+    void broadcast_neuron_weights(int n) {
+        for (int i = 0; i < NEURONS; i++) {
+            for (int j = 0; j < INPUTS; j++) {
+                weights[i*INPUTS + j] = weights[n*INPUTS + j];
+            }
 
-    void save_quantized(std::ostream &stream) {
+            biases[i] = biases[n];
+        }
+    }
+
+
+    void save_quantized(int16_t *data, size_t &index) {
         float clamp_min = layer_quantization_clamp_min;
         float clamp_max = layer_quantization_clamp_max;
         int fracs = layer_quantization_fractions;
@@ -154,69 +270,49 @@ struct training_layer_weights
             quant_correction_frac = (double)output_quantization_fractions / (double)layer_quantization_fractions;
         }
 
-
-
         for (int i = 0; i < NEURONS; i++) {
             for (int j = 0; j < INPUTS; j++) {
                 float val = std::clamp(weights[i*INPUTS + j]*quant_correction_frac, clamp_min, clamp_max);
                 int16_t qval = round(val*fracs);
-                stream.write((char*)&qval, sizeof(int16_t));
+                data[index++] = qval;
             }
         }
         for (int i = 0; i < NEURONS; i++) {
             float val = std::clamp(biases[i], clamp_min, clamp_max);
             int16_t qval = round(val*fracs);
-            stream.write((char*)&qval, sizeof(int16_t));
+            data[index++] = qval;
         }
     }
 
-    void copy_from(const training_layer_weights<INPUTS, NEURONS, IS_OUTPUT_LAYER> &other) {
-        for (int i = 0; i < NEURONS; i++) {
-            biases[i] = other.biases[i];
-        }
-        for (int i = 0; i < NEURONS*INPUTS; i++) {
-            weights[i] = other.weights[i];
-        }
+    void copy_from(const training_layer_weights<INPUTS, NEURONS, IS_OUTPUT_LAYER> &other, int tid, int tc) {
+        copy_vectorized<NEURONS>(biases, other.biases, tid, tc);
+        copy_vectorized<NEURONS*INPUTS>(weights, other.weights, tid, tc);
     }
 
-    void zero()
+    void zero(int tid, int tc)
     {
-        set_vectorized<NEURONS>(biases, 0.0f);
-        set_vectorized<NEURONS*INPUTS>(weights, 0.0f);
+        set_vectorized<NEURONS>(biases, 0.0f, tid, tc);
+        set_vectorized<NEURONS*INPUTS>(weights, 0.0f, tid, tc);
     }
 
-    void mult(float val) {
-        mult_vectorized<NEURONS>(biases, biases, val);
-        mult_vectorized<NEURONS*INPUTS>(weights, weights, val);
+    void mult(float val, int tid, int tc) {
+        mult_vectorized<NEURONS>(biases, biases, val, tid, tc);
+        mult_vectorized<NEURONS*INPUTS>(weights, weights, val, tid, tc);
     }
 
-    void normalize()
-    {
-        double sum_sqr = 0;
-        for (int i = 0; i < NEURONS*INPUTS; i++) {
-            sum_sqr += weights[i]*weights[i];
-        }
-        for (int i = 0; i < NEURONS; i++) {
-            sum_sqr += biases[i]*biases[i];
-        }
-        mult(1.0f/sqrt(sum_sqr));
+    void mult(const training_layer_weights<INPUTS, NEURONS, IS_OUTPUT_LAYER> &other, float val, int tid, int tc) {
+        mult_vectorized<NEURONS>(biases, other.biases, val, tid, tc);
+        mult_vectorized<NEURONS*INPUTS>(weights, other.weights, val, tid, tc);
     }
 
-    double sum_sq()
-    {
-        double sum_sqr = 0;
-        for (int i = 0; i < NEURONS*INPUTS; i++) {
-            sum_sqr += weights[i]*weights[i];
-        }
-        for (int i = 0; i < NEURONS; i++) {
-            sum_sqr += biases[i]*biases[i];
-        }
-        return sum_sqr;
+    void squared(const training_layer_weights<INPUTS, NEURONS, IS_OUTPUT_LAYER> &other, int tid, int tc) {
+        mult_vectorized<NEURONS>(biases, other.biases, other.biases, tid, tc);
+        mult_vectorized<NEURONS*INPUTS>(weights, other.weights, other.weights, tid, tc);
     }
 
-    void squared(const training_layer_weights<INPUTS, NEURONS, IS_OUTPUT_LAYER> &other) {
-        mult_vectorized<NEURONS*INPUTS>(weights, other.weights, other.weights);
-        mult_vectorized<NEURONS>(biases, other.biases, other.biases);
+    void exponential_smoothing(const training_layer_weights<INPUTS, NEURONS, IS_OUTPUT_LAYER> &other, float factor, int tid, int tc) {
+        ema_vectorized<NEURONS>(biases, other.biases, factor, tid, tc);
+        ema_vectorized<NEURONS*INPUTS>(weights, other.weights, factor, tid, tc);
     }
 
     int num_of_biases() const {
@@ -227,53 +323,16 @@ struct training_layer_weights
         return NEURONS*INPUTS;
     }
 
-    void add(const training_layer_weights<INPUTS, NEURONS, IS_OUTPUT_LAYER> &other) {
-        add_vectorized<NEURONS>(biases, biases, other.biases);
-        add_vectorized<NEURONS*INPUTS>(weights, weights, other.weights);
+    int num_of_quantized_params() const {
+        return NEURONS + (NEURONS*INPUTS);
     }
 
-    void gradient_descent(training_layer_weights<INPUTS, NEURONS, IS_OUTPUT_LAYER> *grad, float learning_rate)
-    {
-        float clamp_min = layer_quantization_clamp_min;
-        float clamp_max = layer_quantization_clamp_max;
-        if (IS_OUTPUT_LAYER) {
-            clamp_min = output_quantization_clamp_min;
-            clamp_max = output_quantization_clamp_max;
-        }
-
-        __m256 cmin = _mm256_set1_ps(clamp_min);
-        __m256 cmax = _mm256_set1_ps(clamp_max);
-
-        __m256 lr = _mm256_set1_ps(learning_rate);
-
-        for (int i = 0; i < INPUTS*NEURONS; i += 8) {
-            __m256 w = _mm256_load_ps(&weights[i]);
-            __m256 g = _mm256_load_ps(&grad->weights[i]);
-
-            /*__m256 fg = _mm256_mul_ps(g, lr);
-            __m256 nw = _mm256_sub_ps(w, fg);*/
-            __m256 nw = _mm256_fnmadd_ps(g, lr, w);
-
-            nw = _mm256_min_ps(nw, cmax);
-            nw = _mm256_max_ps(nw, cmin);
-
-            _mm256_store_ps(&weights[i], nw);
-        }
-        for (int i = 0; i < NEURONS; i += 8) {
-
-            __m256 b = _mm256_load_ps(&biases[i]);
-            __m256 g = _mm256_load_ps(&grad->biases[i]);
-
-            /*__m256 fg = _mm256_mul_ps(g, lr);
-            __m256 nb = _mm256_sub_ps(b, fg);*/
-            __m256 nb = _mm256_fnmadd_ps(g, lr, b);
-
-            _mm256_store_ps(&biases[i], nb);
-        }
+    void add(const training_layer_weights<INPUTS, NEURONS, IS_OUTPUT_LAYER> &other, int tid, int tc) {
+        add_vectorized<NEURONS>(biases, biases, other.biases, tid, tc);
+        add_vectorized<NEURONS*INPUTS>(weights, weights, other.weights, tid, tc);
     }
 
-
-    void rmsprop(training_layer_weights<INPUTS, NEURONS, IS_OUTPUT_LAYER> *grad, training_layer_weights<INPUTS, NEURONS, IS_OUTPUT_LAYER> *pg, float learning_rate)
+    void rmsprop(training_layer_weights<INPUTS, NEURONS, IS_OUTPUT_LAYER> *grad, training_layer_weights<INPUTS, NEURONS, IS_OUTPUT_LAYER> *pg, float learning_rate, int tid, int tc)
     {
         float clamp_min = layer_quantization_clamp_min;
         float clamp_max = layer_quantization_clamp_max;
@@ -289,7 +348,10 @@ struct training_layer_weights
 
         __m256 epsilon = _mm256_set1_ps(0.0000001f);
 
-        for (int i = 0; i < INPUTS*NEURONS; i += 8) {
+        int per_thread = INPUTS*NEURONS / tc;
+        int start = per_thread*tid;
+
+        for (int i = start; i < start + per_thread; i += 8) {
             __m256 w = _mm256_load_ps(&weights[i]);
             __m256 g = _mm256_load_ps(&grad->weights[i]);
 
@@ -305,22 +367,23 @@ struct training_layer_weights
             _mm256_store_ps(&weights[i], nw);
         }
 
+        if (tid == 0) {
+            for (int i = 0; i < NEURONS; i += 8) {
 
-        for (int i = 0; i < NEURONS; i += 8) {
+                __m256 b = _mm256_load_ps(&biases[i]);
+                __m256 g = _mm256_load_ps(&grad->biases[i]);
 
-            __m256 b = _mm256_load_ps(&biases[i]);
-            __m256 g = _mm256_load_ps(&grad->biases[i]);
+                __m256 v = _mm256_load_ps(&pg->biases[i]);
 
-            __m256 v = _mm256_load_ps(&pg->biases[i]);
+                __m256 mul = _mm256_mul_ps(lr, _mm256_rsqrt_ps(_mm256_add_ps(v, epsilon)));
 
-            __m256 mul = _mm256_mul_ps(lr, _mm256_rsqrt_ps(_mm256_add_ps(v, epsilon)));
+                __m256 nb = _mm256_fnmadd_ps(g, mul, b);
 
-            __m256 nb = _mm256_fnmadd_ps(g, mul, b);
+                nb = _mm256_min_ps(nb, cmax);
+                nb = _mm256_max_ps(nb, cmin);
 
-            nb = _mm256_min_ps(nb, cmax);
-            nb = _mm256_max_ps(nb, cmin);
-
-            _mm256_store_ps(&biases[i], nb);
+                _mm256_store_ps(&biases[i], nb);
+            }
         }
     }
 
@@ -495,7 +558,7 @@ struct training_layer
                 _mm256_store_ps(&prev_layer_grads1[j], tmp);
             }
 
-            gradients->biases[i] = dc*da;
+            gradients->biases[i] += dc*da;
         }
 
         for (int i = 0; i < (IN/2); i++) {
@@ -508,11 +571,6 @@ struct training_layer
 
 
     void back_propagate(int neuron, training_layer_weights<IN,OUT,IS_OUTPUT_LAYER> *gradients, float *prev_layer_grads0, float *prev_layer_grads1, float *prev_layer_activations0, float *prev_layer_activations1) {
-
-        for (int i = 0; i < IN/2; i++) {
-            prev_layer_grads0[i] = 0;
-            prev_layer_grads1[i] = 0;
-        }
         //float a = neurons[i]; //Activvation
         float x = acculumator[neuron]; //Neurons input
         float dc = grads[neuron]; //cost diff
@@ -523,11 +581,10 @@ struct training_layer
         for (int j = 0; j < IN/2; j += 8) {
             __m256 l0 = _mm256_load_ps(&prev_layer_activations0[j]);
             __m256 w = _mm256_load_ps(&weights->weights[neuron*IN + j]);
-            __m256 l0_grads = _mm256_load_ps(&prev_layer_grads0[j]);
             __m256 g = _mm256_load_ps(&gradients->weights[neuron*IN + j]);
 
 
-            __m256 tmp = _mm256_fmadd_ps(dcda, w, l0_grads);
+            __m256 tmp = _mm256_mul_ps(dcda, w);
             __m256 tmp2 = _mm256_fmadd_ps(dcda, l0, g);
 
             _mm256_store_ps(&gradients->weights[neuron*IN + j], tmp2);
@@ -536,18 +593,17 @@ struct training_layer
         for (int j = 0; j < IN/2; j += 8) {
             __m256 l0 = _mm256_load_ps(&prev_layer_activations1[j]);
             __m256 w = _mm256_load_ps(&weights->weights[neuron*IN + j + IN/2]);
-            __m256 l0_grads = _mm256_load_ps(&prev_layer_grads1[j]);
             __m256 g = _mm256_load_ps(&gradients->weights[neuron*IN + j + IN/2]);
 
 
-            __m256 tmp = _mm256_fmadd_ps(dcda, w, l0_grads);
+            __m256 tmp = _mm256_mul_ps(dcda, w);
             __m256 tmp2 = _mm256_fmadd_ps(dcda, l0, g);
 
             _mm256_store_ps(&gradients->weights[neuron*IN + j + IN/2], tmp2);
             _mm256_store_ps(&prev_layer_grads1[j], tmp);
         }
 
-        gradients->biases[neuron] = dc*da;
+        gradients->biases[neuron] += dc*da;
     }
 
 
@@ -580,7 +636,7 @@ struct training_layer
                 _mm256_store_ps(&gradients->weights[i*IN + j], tmp2);
             }
 
-            gradients->biases[i] = dc*da;
+            gradients->biases[i] += dc*da;
         }
 
         for (int i = 0; i < IN; i++) {
@@ -592,10 +648,6 @@ struct training_layer
 
     void back_propagate(int neuron, training_layer_weights<IN,OUT,IS_OUTPUT_LAYER> *gradients, float *prev_layer_grads, float *prev_layer_activations) {
 
-        for (int i = 0; i < IN; i++) {
-            prev_layer_grads[i] = 0;
-        }
-
         //float a = neurons[i]; //Activvation
         float x = acculumator[neuron]; //Neurons input
         float dc = grads[neuron]; //cost diff
@@ -606,17 +658,16 @@ struct training_layer
         for (int j = 0; j < IN; j += 8) {
             __m256 l0 = _mm256_load_ps(&prev_layer_activations[j]);
             __m256 w = _mm256_load_ps(&weights->weights[neuron*IN + j]);
-            __m256 l0_grads = _mm256_load_ps(&prev_layer_grads[j]);
             __m256 g = _mm256_load_ps(&gradients->weights[neuron*IN + j]);
 
-            __m256 tmp = _mm256_fmadd_ps(dcda, w, l0_grads);
+            __m256 tmp = _mm256_mul_ps(dcda, w);
             __m256 tmp2 = _mm256_fmadd_ps(dcda, l0, g);
 
             _mm256_store_ps(&prev_layer_grads[j], tmp);
             _mm256_store_ps(&gradients->weights[neuron*IN + j], tmp2);
         }
 
-        gradients->biases[neuron] = dc*da;
+        gradients->biases[neuron] += dc*da;
     }
 
 

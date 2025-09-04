@@ -514,7 +514,6 @@ void alphabeta_search::search_root(int32_t window_alpha, int32_t window_beta, in
     root_search_lock.unlock();
 }
 
-
 int32_t alphabeta_search::static_evaluation(const board_state &state, player_type_t player, search_statistics &stats)
 {
     int32_t score;
@@ -527,6 +526,7 @@ int32_t alphabeta_search::static_evaluation(const board_state &state, player_typ
 
         eval_cache[state.zhash].write(state.zhash, score);
     }
+
     return score;
 }
 
@@ -558,6 +558,9 @@ int32_t alphabeta_search::alphabeta(board_state &state, int32_t alpha, int32_t b
     }
 
     //Mate distance pruning
+    //MIN_EVAL + ply is absolutely worst score we can get with this ply
+    //MAX_EVAL - ply is absolutely best score we can get with this ply
+    //After alpha and beta gets adjusted with those limits, we can check if it is possible to find better mate at this ply
     alpha = std::max(alpha, MIN_EVAL + ply);
     beta = std::min(beta, MAX_EVAL - ply);
 
@@ -566,7 +569,7 @@ int32_t alphabeta_search::alphabeta(board_state &state, int32_t alpha, int32_t b
     }
 
     if (depth <= 0 || ply >= MAX_DEPTH-2) {
-        return quisearch(state, alpha, beta, ply, sc, is_pv);
+        return quisearch(state, alpha, beta, 0, ply, sc, is_pv);
     }
 
     chess_move tt_move = chess_move::null_move();
@@ -587,9 +590,6 @@ int32_t alphabeta_search::alphabeta(board_state &state, int32_t alpha, int32_t b
         tt_depth >= depth &&
         state.half_move_clock < 90)
     {
-        //if previous move was null move, move which caused cut-off is threat move
-        sc.moves[ply] = tt_move;
-
         if (tt_node_type == CUT_NODE && tt_score >= beta) {
             return tt_score;
         } else if (tt_node_type == ALL_NODE && tt_score <= alpha) {
@@ -610,6 +610,8 @@ int32_t alphabeta_search::alphabeta(board_state &state, int32_t alpha, int32_t b
         }
     }
 
+    //Improving heurestic
+    //If static evaluation has been increased since our previous turn we are improving
     bool improving = false;
     if (ply >= 2 && sc.static_eval[ply-2] != MIN_EVAL) {
         improving = (static_eval >= sc.static_eval[ply-2]);
@@ -636,8 +638,6 @@ int32_t alphabeta_search::alphabeta(board_state &state, int32_t alpha, int32_t b
         }
     }
 
-
-
     //Reverse futility pruning
     //If evaluation is good enough at shallow depth, we prune
     int32_t rfmargin = std::max(0, sp.rfmargin_base + sp.rfmargin_mult*depth - (improving ? sp.rfmargin_improving_modifier : 0));
@@ -653,7 +653,7 @@ int32_t alphabeta_search::alphabeta(board_state &state, int32_t alpha, int32_t b
     }
 
     //Null move pruning
-    chess_move threat_move = chess_move::null_move();
+    //If position is so good that giving opponent extra move doesn't bring us below beta at reduced search, we can relatively safely prune this subtree
     int non_pawn_pieces = state.count_non_pawn_pieces(state.get_turn());
     if (!is_pv &&
         !in_check &&
@@ -671,9 +671,8 @@ int32_t alphabeta_search::alphabeta(board_state &state, int32_t alpha, int32_t b
 
         int nmp_reduction = 3 + std::clamp((eval - beta) / 100, 0, 4) + (depth / 3);
 
-        int nmp_depth = std::max(depth - nmp_reduction, 1);
+        int nmp_depth = std::max(depth - nmp_reduction, 0);
 
-        sc.moves[ply+1] = chess_move::null_move();
         sc.moves[ply] = chess_move::null_move();
         sc.conthist[ply] = sc.history.get_continuation_history_table_null(state.get_turn());
         sc.stats.nodes += 1;
@@ -704,9 +703,6 @@ int32_t alphabeta_search::alphabeta(board_state &state, int32_t alpha, int32_t b
                 //If null move search returns mate score, return beta because line where mate score is found is not legal
                 return (is_mate_score(null_score) ? beta : null_score);
             }
-        } else {
-            //Move which refutes null move is fetched for improving move ordering
-            threat_move = sc.moves[ply+1];
         }
     }
 
@@ -714,18 +710,22 @@ int32_t alphabeta_search::alphabeta(board_state &state, int32_t alpha, int32_t b
     //If eval is below alpha with big margin and qsearch doesnt reveal easy capture which saves evaluation, node gets pruned
     int32_t razoring_margin = sp.razoring_margin*depth;
     if (!is_pv && !in_check && depth < 5 && eval + razoring_margin < alpha) {
-        int score = quisearch(state, alpha, beta, ply, sc, false);
+        int score = quisearch(state, alpha, beta, 0, ply, sc, false);
         if (score < alpha) {
             return score;
         }
     }
 
-    //IIR
+    //Internal iterative reduction
     //If this unexplored part of tree proves to be important, there will be tt hits at next time this subtree is searched (next ID iteration or LMR/PVS/Aspiration research)
     if ((is_pv || is_cut) && depth >= 3 && !tt_hit) {
         depth -= 1;
     }
 
+    //Singular search
+    //When tt entry is found which is marked as cut or pv node, reduced search is performed to check if there is alternative good moves
+    //When singular search fails high, there might be other moves which can be either better or equally good
+    //When singular search fails low, there is only one good move and move is so called singular move.
     int tt_move_extensions = 0;
     if (tt_hit &&
         (tt_node_type == CUT_NODE || tt_node_type == PV_NODE) &&
@@ -736,6 +736,7 @@ int32_t alphabeta_search::alphabeta(board_state &state, int32_t alpha, int32_t b
         ply + depth < 2*nominal_search_depth)
     {
         int restore_prior_reduction = sc.reduction[ply-1];
+        sc.moves[ply] = chess_move::null_move();
 
         int32_t singular_beta = tt_score - (2*depth);
         int32_t score = alphabeta(state, singular_beta-1, singular_beta, depth / 2, ply, sc, line, &tt_move, (is_cut ? CUT_NODE : ALL_NODE));
@@ -771,7 +772,7 @@ int32_t alphabeta_search::alphabeta(board_state &state, int32_t alpha, int32_t b
     }
 
     move_picker &mpicker = sc.move_pickers[ply];
-    mpicker.init(state, ply, tt_move, threat_move, sc.history, test_flag);
+    mpicker.init(state, ply, tt_move, sc.history, test_flag);
 
     chess_move best_move = chess_move::null_move();
     int32_t best_score = MIN_EVAL;
@@ -993,7 +994,7 @@ int32_t alphabeta_search::alphabeta(board_state &state, int32_t alpha, int32_t b
 
 
 
-int32_t alphabeta_search::quisearch(board_state &state, int32_t alpha, int32_t beta, int ply, search_context &sc, bool is_pv)
+int32_t alphabeta_search::quisearch(board_state &state, int32_t alpha, int32_t beta, int depth, int ply, search_context &sc, bool is_pv)
 {
     if (ply >= MAX_DEPTH) {
         return static_evaluation(state, state.get_turn(), sc.stats);
@@ -1043,7 +1044,7 @@ int32_t alphabeta_search::quisearch(board_state &state, int32_t alpha, int32_t b
     if (!in_check) {
         //Static evaluation works as lower bound of the score quiscence search can return when we are not in check
         //Based on assumption that there is quiet move, which doesn't make position worse
-        //Assumption doesn't hold in many cases, but purpose of quiscence search is to make sure that position where evaluation happens is quiet (opponent have change to recapture)
+        //Assumption doesn't hold in many cases, but purpose of quiscence search is to make sure that position where evaluation happens is quiet (opponent can recapture)
         if (eval >= beta) {
             return eval;
         }
@@ -1051,16 +1052,35 @@ int32_t alphabeta_search::quisearch(board_state &state, int32_t alpha, int32_t b
             alpha = eval;
         }
 
-        chess_move captures[80];
-        int num_of_captures = move_generator::generate_capture_moves(state, state.get_turn(), captures);
-        num_of_captures += move_generator::generate_promotion_moves(state, state.get_turn(), &captures[num_of_captures]);
-        if (num_of_captures == 0) {
-            //No captures of promotions, position is quiet
+        chess_move movelist[80];
+        int num_of_moves = move_generator::generate_capture_moves(state, state.get_turn(), movelist);
+        num_of_moves += move_generator::generate_promotion_moves(state, state.get_turn(), &movelist[num_of_moves]);
+        if (depth == 0) {
+            num_of_moves += move_generator::generate_quiet_checks(state, state.get_turn(), &movelist[num_of_moves]);
+        }
+
+        if (num_of_moves == 0) {
+            //No captures or promotions, position is quiet
             return eval;
         }
-        //Captures are ordered with SEE
-        for (int i = 0; i < num_of_captures; i++) {
-            moves.add(captures[i], (captures[i] == tt_move ? 32000 : static_exchange_evaluation(state, captures[i])));
+
+        //Moves are ordered with SEE. Moves which have negative see are pruned
+        bool tt_move_found = false;
+        for (int i = 0; i < num_of_moves; i++) {
+            if (movelist[i] == tt_move) {
+                tt_move_found = true;
+                moves.add(movelist[i], 32000);
+            } else {
+                int32_t see = static_exchange_evaluation(state, movelist[i]);
+                if (see >= 0) {
+                    moves.add(movelist[i], see);
+                }
+            }
+        }
+
+        //Move from tt will be played even if it is quiet at first ply in qsearch
+        if (tt_hit && !tt_move_found && depth == 0) {
+            moves.add(tt_move, 32000);
         }
 
         best_score = eval;
@@ -1083,12 +1103,6 @@ int32_t alphabeta_search::quisearch(board_state &state, int32_t alpha, int32_t b
         }
         legal_moves++;
 
-        //SEE pruning
-        //Captures with negative SEE have very little changes to increase evaluation
-        if (see < 0 && !in_check) {
-            break;
-        }
-
         uint64_t next_hash = hashgen.update_hash(state.zhash, state, mov);
 
         eval_cache.prefetch(next_hash);
@@ -1098,7 +1112,7 @@ int32_t alphabeta_search::quisearch(board_state &state, int32_t alpha, int32_t b
 
         unmove_data restore = state.make_move(mov, next_hash);
 
-        int32_t score = -quisearch(state, -beta, -alpha, ply+1, sc, is_pv);
+        int32_t score = -quisearch(state, -beta, -alpha, depth-1, ply+1, sc, is_pv);
 
         state.unmake_move(mov, restore);
 

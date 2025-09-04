@@ -9,18 +9,19 @@ enum picked_move_types {MOVES_END = 0,
                         GOOD_CAPTURE_MOVE = 2,
                         PROMOTION_MOVE = 3,
                         KILLER_MOVE = 4,
-                        GOOD_QUIET_MOVE = 5,
-                        BAD_CAPTURE_MOVE = 6,
-                        BAD_QUIET_MOVE = 7};
+                        CHECK_MOVE = 5,
+                        GOOD_QUIET_MOVE = 6,
+                        BAD_CAPTURE_MOVE = 7,
+                        BAD_QUIET_MOVE = 8};
 
 constexpr int GOOD_CAPTURE_ARRAY_SIZE = 20;
 constexpr int GOOD_NON_KILLER_ARRAY_SIZE = 40;
+constexpr int CHECKS_ARRAY_SIZE = 20;
 constexpr int KILLER_ARRAY_SIZE = 10;
 
 constexpr int MAX_CAPTURE_MOVES = 80;
 constexpr int MAX_QUIET_MOVES = 240;
 constexpr int MAX_PROMOTION_MOVES = 24;
-
 
 struct scored_move
 {
@@ -96,14 +97,13 @@ struct scored_move_array
 
 struct move_picker
 {
-    void init(board_state &state_a, int ply_a, chess_move tt_move_a, chess_move threat_move_a, history_heurestic_table &history_table_a, bool test_flag_a) {
+    void init(board_state &state_a, int ply_a, chess_move tt_move_a, history_heurestic_table &history_table_a, bool test_flag_a) {
         history_table = &history_table_a;
         state = &state_a;
         ply = ply_a;
 
         test_flag = test_flag_a;
 
-        threat_move = threat_move_a;
         tt_move = tt_move_a;
 
         tt_move_picked = false;
@@ -120,6 +120,7 @@ struct move_picker
         quiets_generated = false;
         promotions_generated = false;
         killers_generated = false;
+        checks_generated = false;
 
         picked_quiet_count = 0;
         picked_capture_count = 0;
@@ -136,6 +137,7 @@ struct move_picker
         good_non_killers.clear();
         bad_non_killers.clear();
         promotions.clear();
+        checks.clear();
     }
 
     void skip_quiets()
@@ -148,15 +150,8 @@ struct move_picker
         constexpr int32_t minor_threat_value = 6000;
         constexpr int32_t major_threat_value = 12000;
 
-        constexpr int32_t null_move_escape_value = 8000;
-
-        constexpr int32_t king_attack_bonus = 16000;
-        constexpr int32_t attack_bonus = 8000;
-
         piece moving = state->get_square(mov.from);
-
         int32_t score = 0;
-
         if (moving.get_type() == BISHOP || moving.get_type() == KNIGHT) {
             if (state->is_square_threatened_by_pawn(mov.from, moving.get_player())) {
                 score += minor_threat_value;
@@ -175,44 +170,14 @@ struct move_picker
             }
         }
 
-
-        if (score >= 0) {
-            uint_fast8_t opponent_color = (moving.get_player() == WHITE);
-
-            bitboard attack = move_generator::piece_attack(*state, moving, mov.to);
-            bitboard king_sq = (uint64_t)0x1 << (moving.get_player() == WHITE ? state->black_king_square.index : state->white_king_square.index);
-
-            //Attacking greater or equal value pieces without getting en prise
-            bitboard targets = 0;
-            if (moving.get_type() == PAWN) {
-                targets = state->bitboards[KNIGHT][opponent_color] | state->bitboards[ROOK][opponent_color];
-            } else if (moving.get_type() == KNIGHT) {
-                targets = state->bitboards[BISHOP][opponent_color] | state->bitboards[ROOK][opponent_color] | state->bitboards[QUEEN][opponent_color];
-            } else if (moving.get_type() == BISHOP) {
-                targets = state->bitboards[KNIGHT][opponent_color] | state->bitboards[ROOK][opponent_color];
-            }
-            if ((attack & targets) != 0 && !state->is_square_threatened(mov.to, moving.get_player())) {
-                //Extra bonus for forks
-                score += pop_count(attack & (targets | king_sq))*attack_bonus;
-            }
-
-            //Attacking king
-            if ((attack & king_sq) != 0) {
-                score += king_attack_bonus;
-            }
-        }
-        if (threat_move.valid()) {
-            if (mov.from == threat_move.to) {
-                //Escaping capture which caused cut-off in nullmove pruning search
-                score += null_move_escape_value;
-            }
-        }
-
         return score;
     }
 
-    void add_capture_moves(chess_move *moves, int move_count) {
-        for (int i = 0; i < move_count; i++) {
+    void add_capture_moves() {
+        chess_move moves[80];
+        int num_of_moves = move_generator::generate_capture_moves(*state, state->get_turn(), moves);
+
+        for (int i = 0; i < num_of_moves; i++) {
             chess_move m = moves[i];
 
             if (m == tt_move) {
@@ -230,8 +195,11 @@ struct move_picker
         }
     }
 
-    void add_killer_moves(chess_move *moves, int num_of_moves)
+    void add_killer_moves()
     {
+        chess_move moves[16];
+        int num_of_moves = move_generator::generate_killer_moves(*state, *history_table, ply, moves);
+
         for (int i = 0; i < num_of_moves; i++) {
             chess_move m = moves[i];
             if (m == tt_move) {
@@ -243,12 +211,15 @@ struct move_picker
         }
     }
 
-    void add_quiet_moves(chess_move *moves, int num_of_moves) {
+    void add_quiet_moves() {
         constexpr int32_t good_quiet_treshold = 3000;
+
+        chess_move moves[240];
+        int num_of_moves = move_generator::generate_quiet_moves(*state, state->get_turn(), moves);
 
         for (int i = 0; i < num_of_moves; i++) {
             chess_move m = moves[i];
-            if (m == tt_move || killers.contains(m)) {
+            if (m == tt_move || killers.contains(m) || checks.contains(m)) {
                 continue;
             }
 
@@ -262,7 +233,9 @@ struct move_picker
         }
     }
 
-    void add_promotion_moves(chess_move *moves, int num_of_moves) {
+    void add_promotion_moves() {
+        chess_move moves[16];
+        int num_of_moves = move_generator::generate_promotion_moves(*state, state->get_turn(), moves);
         for (int i = 0; i < num_of_moves; i++) {
             chess_move m = moves[i];
             if (m == tt_move) {
@@ -274,6 +247,23 @@ struct move_picker
         }
     }
 
+
+    void add_quiet_checks()
+    {
+        chess_move moves[40];
+        int num_of_moves = move_generator::generate_quiet_checks(*state, state->get_turn(), moves);
+
+        for (int i = 0; i < num_of_moves; i++) {
+            chess_move m = moves[i];
+            if (m == tt_move || killers.contains(m)) {
+                continue;
+            }
+            int32_t score = history_table->get_quiet_history(ply, m);
+            if (static_exchange_evaluation(*state, m) >= 0 && !checks.is_full()) {
+                checks.add(m, score);
+            }
+        }
+    }
 
 
     void previus_pick_was_skipped(const chess_move &skipped_move)
@@ -288,7 +278,6 @@ struct move_picker
     int pick_pseudo_legal(chess_move &m, int32_t &score) {
         switch (stage) {
             case TT_MOVE:
-
                 if (!tt_move_picked && tt_move_valid) {
                     score = 32000;
                     tt_move_picked = true;
@@ -298,12 +287,8 @@ struct move_picker
                 stage = GOOD_CAPTURE_MOVE;
 
             case GOOD_CAPTURE_MOVE:
-
                 if (!captures_generated) {
-                    chess_move movelist[80];
-                    int num_of_moves = move_generator::generate_capture_moves(*state, state->get_turn(), movelist);
-                    add_capture_moves(movelist, num_of_moves);
-
+                    add_capture_moves();
                     captures_generated = true;
                 }
                 if (winning_captures.pick(m, score)) {
@@ -312,12 +297,8 @@ struct move_picker
                 stage = PROMOTION_MOVE;
 
             case PROMOTION_MOVE:
-
                 if (!promotions_generated) {
-                    chess_move movelist[16];
-                    int num_of_moves = move_generator::generate_promotion_moves(*state, state->get_turn(), movelist);
-                    add_promotion_moves(movelist, num_of_moves);
-
+                    add_promotion_moves();
                     promotions_generated = true;
                 }
                 if (promotions.pick(m, score)) {
@@ -326,25 +307,27 @@ struct move_picker
                 stage = KILLER_MOVE;
 
             case KILLER_MOVE:
-
                 if (!killers_generated) {
-                    chess_move movelist[16];
-                    int num_of_moves = move_generator::generate_killer_moves(*state, *history_table, ply, movelist);
-                    add_killer_moves(movelist, num_of_moves);
-
+                    add_killer_moves();
                     killers_generated = true;
                 }
                 if (killers.pick(m, score)) {
                     return KILLER_MOVE;
                 }
-                stage = GOOD_QUIET_MOVE;
+                stage = CHECK_MOVE;
 
+            case CHECK_MOVE:
+                if (!checks_generated) {
+                    add_quiet_checks();
+                    checks_generated = true;
+                }
+                if (checks.pick(m, score)) {
+                    return CHECK_MOVE;
+                }
+                stage = GOOD_QUIET_MOVE;
             case GOOD_QUIET_MOVE:
                 if (!quiets_generated && !skip_quiets_flag) {
-                    chess_move movelist[240];
-                    int num_of_moves = move_generator::generate_quiet_moves(*state, state->get_turn(), movelist);
-                    add_quiet_moves(movelist, num_of_moves);
-
+                    add_quiet_moves();
                     quiets_generated = true;
                 }
                 if (good_non_killers.pick(m, score) && !skip_quiets_flag) {
@@ -399,8 +382,6 @@ struct move_picker
     int32_t previus_pick_score;
 
 private:
-    chess_move threat_move;
-
     int stage;
 
     board_state *state;
@@ -412,6 +393,8 @@ private:
     bool promotions_generated;
     bool killers_generated;
 
+    bool checks_generated;
+
     chess_move tt_move;
 
     scored_move_array<GOOD_CAPTURE_ARRAY_SIZE>    winning_captures;
@@ -421,6 +404,7 @@ private:
     scored_move_array<GOOD_NON_KILLER_ARRAY_SIZE> good_non_killers;
     scored_move_array<MAX_QUIET_MOVES>            bad_non_killers;
     scored_move_array<MAX_PROMOTION_MOVES>        promotions;
+    scored_move_array<CHECKS_ARRAY_SIZE>          checks;
 
     bool tt_move_valid;
     bool tt_move_picked;
@@ -429,3 +413,5 @@ private:
 
     bool test_flag;
 };
+
+

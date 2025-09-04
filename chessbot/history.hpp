@@ -67,22 +67,8 @@ struct history_heurestic_table
         return score;
     }
 
-    int num_of_killers(int ply)
-    {
-        int n = 0;
-        for (int i = 0; i < KILLER_MOVE_SLOTS; i++) {
-            if (killer_moves[ply][i] != chess_move::null_move()) {
-                n++;
-            }
-        }
-        return n;
-    }
-
-
     void update(chess_move bm, int depth, int ply, chess_move *searched_quiets, int searched_quiet_count, chess_move *searched_captures, int searched_capture_count) {
-        bool is_capture = bm.is_capture();
-
-        if (!is_capture) {
+        if (!bm.is_capture()) {
             int b = KILLER_MOVE_SLOTS-1;
             for (int i = 0; i < KILLER_MOVE_SLOTS; i++) {
                 if (killer_moves[ply][i] == bm) {
@@ -102,7 +88,7 @@ struct history_heurestic_table
 
         int32_t bonus = std::min(32 * depth * depth, 8192);
 
-        if (is_capture) {
+        if (bm.is_capture()) {
             if (searched_capture_count > 1) {
                 capture_history[bm.get_captured_piece().get_type()].update(bm, bonus*(searched_capture_count-1));
 

@@ -36,25 +36,6 @@ struct nnue_layer_weights
         delete [] biases_buffer;
     }
 
-
-    void load(std::istream &stream) {
-        stream.read((char*)weights, (NEURONS*INPUTS)*sizeof(int16_t));
-        stream.read((char*)biases, NEURONS*sizeof(int16_t));
-    }
-
-    void load_sb(std::istream &stream) {
-
-        int16_t *w = new int16_t[INPUTS+1];
-        stream.read((char*)w, (INPUTS+1)*sizeof(int16_t));
-        for (int i = 0; i < NEURONS; i++) {
-            for (int j = 0; j < INPUTS; j++) {
-                weights[i*INPUTS + j] = w[j];
-            }
-            biases[i] = w[INPUTS];
-        }
-        delete [] w;
-    }
-
     void load(int16_t *data, size_t &index)
     {
         for (size_t i = 0; i < NEURONS*INPUTS; i++) {

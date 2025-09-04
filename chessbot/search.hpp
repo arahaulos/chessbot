@@ -294,11 +294,6 @@ public:
         shared_nnue_weights->load(path);
     }
 
-    void load_nnue_net_sb(std::string path)
-    {
-        shared_nnue_weights->load_sb(path);
-    }
-
     void set_shared_weights(std::shared_ptr<nnue_weights> weights) {
         shared_nnue_weights = weights;
         for (size_t i = 0; i < thread_datas.size(); i++) {
@@ -444,7 +439,7 @@ private:
     void search_root(int32_t window_alpha, int32_t window_beta, int depth, int thread_id);
 
     int32_t alphabeta(board_state &state, int32_t alpha, int32_t beta, int depth, int ply, search_context &sc, pv_table &pv, chess_move *skip_move, node_type_t expected_node_type);
-    int32_t quisearch(board_state &state, int32_t alpha, int32_t beta, int ply, search_context &sc, bool is_pv);
+    int32_t quisearch(board_state &state, int32_t alpha, int32_t beta, int depth, int ply, search_context &sc, bool is_pv);
 
 
     int number_of_helper_threads;

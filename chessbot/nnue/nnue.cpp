@@ -1,6 +1,7 @@
 #include "nnue.hpp"
 #include "../state.hpp"
 #include <algorithm>
+#include "huffman.hpp"
 
 
 void nnue_network::refresh(const board_state &s, player_type_t stm)
@@ -150,12 +151,18 @@ unsigned char* embedded_weights_data = _binary_embedded_weights_nnue_start;
 
 nnue_weights::nnue_weights()
 {
+    uint8_t *decoded_data;
+    int decoded_size;
+    huffman_coder::decode(embedded_weights_data, embedded_weights_size, decoded_data, decoded_size);
+
     rescale_factor0 = 1;
     rescale_factor1 = 1;
 
     size_t index = 0;
-    perspective_weights.load((int16_t*)embedded_weights_data, index);
-    output_weights.load((int16_t*)embedded_weights_data, index);
+    perspective_weights.load((int16_t*)decoded_data, index);
+    output_weights.load((int16_t*)decoded_data, index);
+
+    delete [] decoded_data;
 }
 
 
@@ -163,23 +170,28 @@ void nnue_weights::load(std::string path)
 {
     std::ifstream file(path.c_str(), std::ios::binary);
     if (file.is_open()) {
-        perspective_weights.load(file);
-        output_weights.load(file);
+        file.seekg(0, std::ios::end);
+        size_t fsize = file.tellg();
+        file.seekg(0, std::ios::beg);
+
+
+        uint8_t *encoded_data = new uint8_t[fsize];
+
+        file.read((char*)encoded_data, fsize);
+
+        uint8_t *decoded_data;
+        int decoded_size;
+        huffman_coder::decode(encoded_data, fsize, decoded_data, decoded_size);
+
+        size_t index = 0;
+        perspective_weights.load((int16_t*)decoded_data, index);
+        output_weights.load((int16_t*)decoded_data, index);
+
+        delete [] encoded_data;
+        delete [] decoded_data;
     }
     file.close();
 }
-
-
-void nnue_weights::load_sb(std::string path)
-{
-    std::ifstream file(path.c_str(), std::ios::binary);
-    if (file.is_open()) {
-        perspective_weights.load(file);
-        output_weights.load_sb(file);
-    }
-    file.close();
-}
-
 
 
 

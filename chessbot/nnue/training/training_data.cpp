@@ -278,6 +278,35 @@ training_batch_manager::~training_batch_manager()
     delete [] buffers[1];
 }
 
+int get_king_bucket_configuration(training_position &pos)
+{
+    uint64_t occupation = pos.occupation;
+    int index = 0;
+    int sq_index;
+    piece p;
+
+    int num_of_pieces = pos.count_pieces();
+    int white_king_sq = 0;
+    int black_king_sq = 0;
+    for (int i = 0; i < num_of_pieces; i++) {
+        p.d = pos.iterate_pieces(occupation, index, sq_index);
+
+        if (p.get_player() == WHITE && p.get_type() == KING) {
+            white_king_sq = sq_index;
+        } else if (p.get_player() == BLACK && p.get_type() == KING) {
+            black_king_sq = sq_index;
+        }
+    }
+    black_king_sq ^= 56;
+
+
+    int white_bucket = get_king_bucket(white_king_sq);
+    int black_bucket = get_king_bucket(black_king_sq);
+
+    return std::min(white_bucket,black_bucket)*16 + std::max(white_bucket, black_bucket);
+}
+
+
 void training_batch_manager::load_epoch(training_position *buffer)
 {
     std::random_device rd;
@@ -327,6 +356,20 @@ void training_batch_manager::load_epoch(training_position *buffer)
         size_t j = dist(gen) % (i+1);
 
         std::swap(buffer[i], buffer[j]);
+    }
+
+
+    std::vector<std::pair<training_position, int>> batch(batch_size);
+
+    for (size_t i = 0; i < epoch_size - batch_size; i += batch_size) {
+        for (size_t j = 0; j < batch_size; j++) {
+            batch[j].first = buffer[i + j];
+            batch[j].second = get_king_bucket_configuration(buffer[i + j]);
+        }
+        std::sort(batch.begin(), batch.end(), [] (auto &a, auto &b) {return a.second > b.second;});
+        for (size_t j = 0; j < batch_size; j++) {
+            buffer[i + j] = batch[j].first;
+        }
     }
 }
 

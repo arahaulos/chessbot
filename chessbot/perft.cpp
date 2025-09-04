@@ -135,7 +135,7 @@ uint64_t perft::debug_perft(board_state &state, int depth, int ply, search_conte
     }
 
     move_picker picker;
-    picker.init(state, ply, tt_move, chess_move::null_move(), sc.history, true);
+    picker.init(state, ply, tt_move, sc.history, true);
 
     chess_move best_move = chess_move::null_move();
     uint64_t c = 0;

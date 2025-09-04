@@ -56,6 +56,33 @@ struct move_generator
         return 0;
     }
 
+
+    static bitboard piece_quiet_moves(const board_state &state, piece p, square_index sq)
+    {
+        uint_fast8_t color = (p.get_player() == BLACK);
+        bitboard occupation = state.pieces_by_color[0] | state.pieces_by_color[1];
+        bitboard mask = ~occupation;
+
+        switch (p.get_type()) {
+            case PAWN:
+                return bitboard_utils.pawn_advance(sq.index, occupation, color);
+            case KNIGHT:
+                return bitboard_utils.knight_attack(sq.index, mask);
+            case BISHOP:
+                return bitboard_utils.bishop_attack(sq.index, occupation, mask);
+            case ROOK:
+                return bitboard_utils.rook_attack(sq.index, occupation, mask);
+            case QUEEN:
+                return bitboard_utils.queen_attack(sq.index, occupation, mask);
+            case KING:
+                return bitboard_utils.king_attack(sq.index, mask);
+            default:
+                return 0;
+        }
+        return 0;
+    }
+
+
     static chess_move *generate_pawn_attack(const board_state &state, bool color, const bitboard &occupation, const bitboard &en_passant, const bitboard &mask, chess_move *buffer)
     {
         chess_move m;
@@ -324,6 +351,95 @@ struct move_generator
         bitboard occupation = ~state.bitboards[EMPTY][0];
 
         buffer_ptr = generate_pawn_advance(state, color, occupation, (uint64_t)0xFF000000000000FF, buffer_ptr);
+
+        return buffer_ptr - movelist;
+    }
+
+    static int generate_quiet_checks(const board_state &state, player_type_t player, chess_move *movelist)
+    {
+        //Doesn't consider castling checks!!!
+
+
+        uint_fast8_t color = (player == BLACK);
+
+        chess_move *buffer_ptr = movelist;
+
+        bitboard own_pieces = state.pieces_by_color[color];
+        bitboard enemy_pieces = state.pieces_by_color[!color];
+
+        bitboard occupation = own_pieces | enemy_pieces;
+
+        uint_fast8_t opponent_king = (player == WHITE ? state.black_king_square.index : state.white_king_square.index);
+
+        bitboard bishop_target = bitboard_utils.bishop_attack(opponent_king, occupation, ~(uint64_t)0);
+        bitboard rook_target = bitboard_utils.rook_attack(opponent_king, occupation, ~(uint64_t)0);
+        bitboard knight_target = bitboard_utils.knight_attack(opponent_king, ~occupation);
+        bitboard pawn_target = bitboard_utils.pawn_attack(opponent_king, ~(uint64_t)0, !color, ~occupation, 0);
+
+        buffer_ptr = generate_pawn_advance(state, color, occupation, pawn_target, buffer_ptr);
+        buffer_ptr = generate_knight(state, color, occupation, knight_target, buffer_ptr);
+        buffer_ptr = generate_bishop(state, color, occupation, bishop_target & (~occupation), buffer_ptr);
+        buffer_ptr = generate_rook(state, color, occupation, rook_target & (~occupation), buffer_ptr);
+        buffer_ptr = generate_queen(state, color, occupation, (bishop_target | rook_target) & (~occupation), buffer_ptr);
+
+        bitboard potential_blockers = 0;
+        if ((bishop_target & own_pieces) != 0) {
+            bitboard bishop_xray = bitboard_utils.bishop_xray_attack(opponent_king, occupation, ~(uint64_t)0);
+            if ((bishop_xray & state.bitboards[BISHOP][color]) != 0 ||
+                (bishop_xray & state.bitboards[QUEEN][color]) != 0) {
+
+                potential_blockers |= (bishop_target & own_pieces);
+            }
+        }
+
+        if ((rook_target & own_pieces) != 0) {
+            bitboard rook_xray = bitboard_utils.rook_xray_attack(opponent_king, occupation, ~(uint64_t)0);
+            if ((rook_xray & state.bitboards[ROOK][color]) != 0 ||
+                (rook_xray & state.bitboards[QUEEN][color]) != 0) {
+
+                potential_blockers |= (rook_target & own_pieces);
+            }
+        }
+
+        while (potential_blockers) {
+            uint_fast8_t index = bit_scan_forward (potential_blockers);
+            potential_blockers &= potential_blockers-1;
+
+            piece p = state.get_square(index);
+
+            chess_move mov;
+            mov.from = index;
+            mov.promotion = EMPTY;
+            mov.encoded_pieces = chess_move::encode_moving_piece(p);
+
+            bitboard moves = piece_quiet_moves(state, p, index);
+
+            if (p.get_type() == PAWN) {
+                moves &= ~(uint64_t)0xFF000000000000FF;
+            }
+
+            while (moves) {
+                uint_fast8_t target_index = bit_scan_forward (moves);
+                moves &= moves-1;
+
+                mov.to = target_index;
+
+                if (state.causes_check(mov, next_turn(player))) {
+                    int num_of_moves = buffer_ptr - movelist;
+                    bool found = false;
+                    for (int i = 0; i < num_of_moves; i++) {
+                        if (movelist[i] == mov) {
+                            found = true;
+                            break;
+                        }
+                    }
+                    if (!found) {
+                        *buffer_ptr = mov;
+                        buffer_ptr++;
+                    }
+                }
+            }
+        }
 
         return buffer_ptr - movelist;
     }

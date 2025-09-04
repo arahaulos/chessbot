@@ -2,6 +2,7 @@ bin/
 obj/
 builds/
 tuning/
+vis/
 *.o
 *.bat
 *.exe

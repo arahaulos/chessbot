@@ -29,7 +29,6 @@ struct nnue_weights
     int rescale_factor1;
 
     void load(std::string path);
-    void load_sb(std::string path);
 };
 
 struct nnue_network

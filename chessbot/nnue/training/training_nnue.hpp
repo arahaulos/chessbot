@@ -96,43 +96,74 @@ struct training_weights
     training_layer_weights<num_perspective_neurons*2, output_buckets, true> output_weights;
 
 
+    void copy_from(const training_weights &other, int tid, int tc) {
+        perspective_weights.copy_from(other.perspective_weights, tid, tc);
+        output_weights.copy_from(other.output_weights, tid, tc);
+    }
+
+    void add(const training_weights &other, int tid, int tc) {
+        perspective_weights.add(other.perspective_weights, tid, tc);
+        output_weights.add(other.output_weights, tid, tc);
+    }
+
+    void mult(float val, int tid, int tc) {
+        perspective_weights.mult(val, tid, tc);
+        output_weights.mult(val, tid, tc);
+    }
+
+    void mult(training_weights &other, float val, int tid, int tc) {
+        perspective_weights.mult(other.perspective_weights, val, tid, tc);
+        output_weights.mult(other.output_weights, val, tid, tc);
+    }
+
+    void squared(training_weights &other, int tid, int tc) {
+        perspective_weights.squared(other.perspective_weights, tid, tc);
+        output_weights.squared(other.output_weights, tid, tc);
+    }
+
+    void exponential_smoothing(training_weights &other, float factor, int tid, int tc) {
+        perspective_weights.exponential_smoothing(other.perspective_weights, factor, tid, tc);
+        output_weights.exponential_smoothing(other.output_weights, factor, tid, tc);
+    }
+
+    void divide(float val, int tid, int tc) {
+        float inv_val = 1.0f / val;
+
+        perspective_weights.mult(inv_val, tid, tc);
+        output_weights.mult(inv_val, tid, tc);
+    }
+
+    void zero(int tid, int tc) {
+        perspective_weights.zero(tid, tc);
+        output_weights.zero(tid, tc);
+    }
+
+
     void copy_from(const training_weights &other) {
-        perspective_weights.copy_from(other.perspective_weights);
-        output_weights.copy_from(other.output_weights);
+        copy_from(other, 0, 1);
     }
 
     void add(const training_weights &other) {
-        perspective_weights.add(other.perspective_weights);
-        output_weights.add(other.output_weights);
+        add(other, 0, 1);
     }
 
     void mult(float val) {
-        perspective_weights.mult(val);
-        output_weights.mult(val);
+        mult(val, 0, 1);
     }
 
     void squared(training_weights &other) {
-        perspective_weights.squared(other.perspective_weights);
-        output_weights.squared(other.output_weights);
+        squared(other, 0, 1);
     }
 
     void divide(float val) {
-        float inv_val = 1.0f / val;
-
-        perspective_weights.mult(inv_val);
-        output_weights.mult(inv_val);
+        divide(val, 0, 1);
     }
 
     void zero() {
-        perspective_weights.zero();
-        output_weights.zero();
+        zero(0, 1);
     }
 
-    void normalize()
-    {
-        perspective_weights.normalize();
-        output_weights.normalize();
-    }
+
 
     void save_file(std::string path);
     void load_file(std::string path);

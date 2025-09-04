@@ -175,6 +175,10 @@ struct chess_move
         return (promotion != EMPTY);
     }
 
+    bool is_castling() const {
+        return (get_moving_piece().get_type() == KING && std::abs(from.get_x() - to.get_x()) > 1);
+    }
+
     inline bool operator == (const chess_move &other) const {
         return (from == other.from && to == other.to && promotion == other.promotion);
     }

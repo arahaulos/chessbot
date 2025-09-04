@@ -1,5 +1,6 @@
 #include "training_nnue.hpp"
 #include "../../state.hpp"
+#include "../huffman.hpp"
 
 
 float training_network::evaluate(const board_state &s)
@@ -108,14 +109,19 @@ float training_network::evaluate(const training_position &tp)
         int flipped_sq_index = sq_index^56;
         int flipped_color = (color == BLACK ? WHITE : BLACK);
 
-        white_side.set_input(encode_input_with_buckets(type, color, sq_index, white_king_sq));
-        black_side.set_input(encode_input_with_buckets(type, flipped_color, flipped_sq_index, black_king_sq));
+        int white_input = encode_input_with_buckets(type, color, sq_index, white_king_sq);
+        int black_input = encode_input_with_buckets(type, flipped_color, flipped_sq_index, black_king_sq);
 
+        white_side.prefetch_input(white_input);
+        black_side.prefetch_input(black_input);
 
         if (use_factorizer) {
             white_side.set_input(encode_factorizer_input(type, color, sq_index, white_king_sq));
             black_side.set_input(encode_factorizer_input(type, flipped_color, flipped_sq_index, black_king_sq));
         }
+
+        white_side.set_input(white_input);
+        black_side.set_input(black_input);
     }
 
     output_bucket = encode_output_bucket(non_pawn_pieces);
@@ -129,7 +135,6 @@ float training_network::evaluate(const training_position &tp)
     }
     return output_layer.neurons[output_bucket];
 }
-
 
 void training_weights::save_file(std::string path)
 {
@@ -154,12 +159,25 @@ void training_weights::load_file(std::string path)
 
 void training_weights::save_quantized(std::string path)
 {
+    int16_t *weights = new int16_t[perspective_weights.num_of_quantized_params() + output_weights.num_of_quantized_params()];
+    size_t index = 0;
+
+    perspective_weights.save_quantized(weights, index);
+    output_weights.save_quantized(weights, index);
+
+    uint8_t *encoded_data;
+    int encoded_size;
+
+    huffman_coder::encode((uint8_t*)weights, index*2, encoded_data, encoded_size);
+
     std::ofstream file(path.c_str(), std::ios::binary);
     if (file.is_open()) {
-        perspective_weights.save_quantized(file);
-        output_weights.save_quantized(file);
+        file.write((char*)encoded_data, encoded_size);
     }
     file.close();
+
+    delete [] weights;
+    delete [] encoded_data;
 }
 
 

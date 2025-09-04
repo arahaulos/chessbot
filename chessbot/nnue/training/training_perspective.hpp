@@ -26,7 +26,7 @@ struct training_perspective_weights
         stream.write((char*)biases, NEURONS*sizeof(float));
     }
 
-    void save_quantized(std::ostream &stream) {
+    void save_quantized(int16_t *data, size_t &index) {
         for (size_t j = 0; j < num_perspective_inputs; j++) {
             for (size_t i = 0; i < NEURONS; i++) {
                 float w = weights[j*NEURONS + i];
@@ -37,73 +37,77 @@ struct training_perspective_weights
 
                 float val = std::clamp(w+fw, halfkp_quantization_clamp_min, halfkp_quantization_clamp_max);
                 int16_t qval = round(val*halfkp_quantization_fractions);
-                stream.write((char*)&qval, sizeof(int16_t));
+                data[index++] = qval;
             }
         }
         for (int i = 0; i < NEURONS; i++) {
             float val = std::clamp(biases[i], halfkp_quantization_clamp_min, halfkp_quantization_clamp_max);
             int16_t qval = round(val*halfkp_quantization_fractions);
-            stream.write((char*)&qval, sizeof(int16_t));
+            data[index++] = qval;
         }
     }
 
     void load(std::istream &stream) {
+        /*float *fw = new float[512*INPUTS];
+        stream.read((char*)fw, 512*INPUTS*sizeof(float));
+
+        for (int i = 0; i < INPUTS; i++) {
+            for (int j = 0; j < 512; j++) {
+                weights[i*NEURONS + j] = fw[i*512 + j];
+            }
+            for (int j = 512; j < NEURONS; j++) {
+                //weights[i*NEURONS + j] = 0;
+            }
+        }
+
+        for (int i = 0; i < NEURONS; i++) {
+            if (i < 512) {
+                stream.read((char*)&biases[i], sizeof(float));
+            } else {
+                //biases[i] = 0;
+            }
+        }
+
+        delete [] fw;*/
+
         stream.read((char*)weights, (NEURONS*INPUTS)*sizeof(float));
         stream.read((char*)biases, NEURONS*sizeof(float));
     }
 
-    void copy_from(const training_perspective_weights<INPUTS, NEURONS> &other) {
-        for (size_t i = 0; i < NEURONS; i++) {
-            biases[i] = other.biases[i];
-        }
-        for (size_t i = 0; i < NEURONS*INPUTS; i++) {
-            weights[i] = other.weights[i];
-        }
+    void copy_from(const training_perspective_weights<INPUTS, NEURONS> &other, int tid, int tc) {
+        copy_vectorized<NEURONS>(biases, other.biases, tid, tc);
+        copy_vectorized<NEURONS*INPUTS>(weights, other.weights, tid, tc);
     }
 
-    void zero()
+    void zero(int tid, int tc)
     {
-        set_vectorized<NEURONS>(biases, 0.0f);
-        set_vectorized<NEURONS*INPUTS>(weights, 0.0f);
+        set_vectorized<NEURONS>(biases, 0.0f, tid, tc);
+        set_vectorized<NEURONS*INPUTS>(weights, 0.0f, tid, tc);
     }
 
-    void add(const training_perspective_weights<INPUTS, NEURONS> &other) {
-        add_vectorized<NEURONS>(biases, biases, other.biases);
-        add_vectorized<NEURONS*INPUTS>(weights, weights, other.weights);
+    void add(const training_perspective_weights<INPUTS, NEURONS> &other, int tid, int tc) {
+        add_vectorized<NEURONS>(biases, biases, other.biases, tid, tc);
+        add_vectorized<NEURONS*INPUTS>(weights, weights, other.weights, tid, tc);
     }
 
-    void mult(float val) {
-        mult_vectorized<NEURONS>(biases, biases, val);
-        mult_vectorized<NEURONS*INPUTS>(weights, weights, val);
+    void mult(float val, int tid, int tc) {
+        mult_vectorized<NEURONS>(biases, biases, val, tid, tc);
+        mult_vectorized<NEURONS*INPUTS>(weights, weights, val, tid, tc);
     }
 
-    void squared(const training_perspective_weights<INPUTS, NEURONS> &other) {
-        mult_vectorized<NEURONS*INPUTS>(weights, other.weights, other.weights);
-        mult_vectorized<NEURONS>(biases, other.biases, other.biases);
+    void mult(const training_perspective_weights<INPUTS, NEURONS> &other, float val, int tid, int tc) {
+        mult_vectorized<NEURONS>(biases, other.biases, val, tid, tc);
+        mult_vectorized<NEURONS*INPUTS>(weights, other.weights, val, tid, tc);
     }
 
-    void normalize()
-    {
-        double sum_sqr = 0;
-        for (int i = 0; i < NEURONS*INPUTS; i++) {
-            sum_sqr += weights[i]*weights[i];
-        }
-        for (int i = 0; i < NEURONS; i++) {
-            sum_sqr += biases[i]*biases[i];
-        }
-        mult(1.0f/sqrt(sum_sqr));
+    void squared(const training_perspective_weights<INPUTS, NEURONS> &other, int tid, int tc) {
+        mult_vectorized<NEURONS>(biases, other.biases, other.biases, tid, tc);
+        mult_vectorized<NEURONS*INPUTS>(weights, other.weights, other.weights, tid, tc);
     }
 
-    double sum_sq()
-    {
-        double sum_sqr = 0;
-        for (int i = 0; i < NEURONS*INPUTS; i++) {
-            sum_sqr += weights[i]*weights[i];
-        }
-        for (int i = 0; i < NEURONS; i++) {
-            sum_sqr += biases[i]*biases[i];
-        }
-        return sum_sqr;
+    void exponential_smoothing(const training_perspective_weights<INPUTS, NEURONS> &other, float factor, int tid, int tc) {
+        ema_vectorized<NEURONS>(biases, other.biases, factor, tid, tc);
+        ema_vectorized<NEURONS*INPUTS>(weights, other.weights, factor, tid, tc);
     }
 
     int num_of_biases() const {
@@ -114,42 +118,11 @@ struct training_perspective_weights
         return NEURONS*INPUTS;
     }
 
-    void gradient_descent(training_perspective_weights<INPUTS, NEURONS> *grad, float learning_rate)
-    {
-        __m256 cmin = _mm256_set1_ps(halfkp_quantization_clamp_min);
-        __m256 cmax = _mm256_set1_ps(halfkp_quantization_clamp_max);
-
-        __m256 lr = _mm256_set1_ps(learning_rate);
-
-        for (int i = 0; i < INPUTS*NEURONS; i += 8) {
-            __m256 w = _mm256_load_ps(&weights[i]);
-            __m256 g = _mm256_load_ps(&grad->weights[i]);
-
-            /*__m256 fg = _mm256_mul_ps(g, lr);
-            __m256 nw = _mm256_sub_ps(w, fg);*/
-
-            __m256 nw = _mm256_fnmadd_ps(g, lr, w);
-
-            nw = _mm256_min_ps(nw, cmax);
-            nw = _mm256_max_ps(nw, cmin);
-
-            _mm256_store_ps(&weights[i], nw);
-        }
-        for (int i = 0; i < NEURONS; i += 8) {
-
-            __m256 b = _mm256_load_ps(&biases[i]);
-            __m256 g = _mm256_load_ps(&grad->biases[i]);
-
-            /*__m256 fg = _mm256_mul_ps(g, lr);
-            __m256 nb = _mm256_sub_ps(b, fg);*/
-
-            __m256 nb = _mm256_fnmadd_ps(g, lr, b);
-
-            _mm256_store_ps(&biases[i], nb);
-        }
+    int num_of_quantized_params() const {
+        return NEURONS + (num_perspective_inputs*NEURONS);
     }
 
-    void rmsprop(training_perspective_weights<INPUTS, NEURONS> *grad, training_perspective_weights<INPUTS, NEURONS> *pg, float learning_rate)
+    void rmsprop(training_perspective_weights<INPUTS, NEURONS> *grad, training_perspective_weights<INPUTS, NEURONS> *pg, float learning_rate, int tid, int tc)
     {
         __m256 cmin = _mm256_set1_ps(halfkp_quantization_clamp_min);
         __m256 cmax = _mm256_set1_ps(halfkp_quantization_clamp_max);
@@ -158,7 +131,10 @@ struct training_perspective_weights
 
         __m256 epsilon = _mm256_set1_ps(0.0000001f);
 
-        for (int i = 0; i < INPUTS*NEURONS; i += 8) {
+        int per_thread = INPUTS*NEURONS / tc;
+        int start = per_thread*tid;
+
+        for (int i = start; i < start + per_thread; i += 8) {
             __m256 w = _mm256_load_ps(&weights[i]);
             __m256 g = _mm256_load_ps(&grad->weights[i]);
 
@@ -173,21 +149,24 @@ struct training_perspective_weights
 
             _mm256_store_ps(&weights[i], nw);
         }
-        for (int i = 0; i < NEURONS; i += 8) {
 
-            __m256 b = _mm256_load_ps(&biases[i]);
-            __m256 g = _mm256_load_ps(&grad->biases[i]);
+        if (tid == 0) {
+            for (int i = 0; i < NEURONS; i += 8) {
 
-            __m256 v = _mm256_load_ps(&pg->biases[i]);
+                __m256 b = _mm256_load_ps(&biases[i]);
+                __m256 g = _mm256_load_ps(&grad->biases[i]);
 
-            __m256 mul = _mm256_mul_ps(lr, _mm256_rsqrt_ps(_mm256_add_ps(v, epsilon)));
+                __m256 v = _mm256_load_ps(&pg->biases[i]);
 
-            __m256 nb = _mm256_fnmadd_ps(g, mul, b);
+                __m256 mul = _mm256_mul_ps(lr, _mm256_rsqrt_ps(_mm256_add_ps(v, epsilon)));
 
-            nb = _mm256_min_ps(nb, cmax);
-            nb = _mm256_max_ps(nb, cmin);
+                __m256 nb = _mm256_fnmadd_ps(g, mul, b);
 
-            _mm256_store_ps(&biases[i], nb);
+                nb = _mm256_min_ps(nb, cmax);
+                nb = _mm256_max_ps(nb, cmin);
+
+                _mm256_store_ps(&biases[i], nb);
+            }
         }
     }
 
@@ -278,6 +257,17 @@ struct training_perspective
         active_inputs[num_of_active_inputs++] = index;
     }
 
+
+    void prefetch_input(int index) {
+        constexpr int cacheline_size = 64;
+        float *w = &weights->weights[index*NEURONS];
+
+        for (int i = 0; i < NEURONS; i += cacheline_size / sizeof(float)) {
+            __builtin_prefetch(&w[i]);
+        }
+    }
+
+
     void update() {
         /*for (int i = 0; i < NEURONS; i++) {
             neurons[i] = activation_func(acculumator[i]);
@@ -298,21 +288,47 @@ struct training_perspective
 
     void back_propagate(training_perspective_weights<INPUTS, NEURONS> *gradients) {
         __m256 zero = _mm256_set1_ps(0.0f);
-        //__m256 zero = _mm256_set1_ps(0.01f);
         __m256 one = _mm256_set1_ps(1.0f);
 
-        __m256 half = _mm256_set1_ps(0.5f);
+
+
+        for (int i = 0; i < NEURONS; i += 8) {
+            __m256 x = _mm256_load_ps(&acculumator[i]);
+            __m256 dc = _mm256_load_ps(&grads[i]);
+
+            __m256 cmp_ge = _mm256_cmp_ps(x, zero, _CMP_GE_OS); // x >= 0.0f
+            __m256 cmp_le = _mm256_cmp_ps(x, one, _CMP_LE_OS);  // x <= 1.0f
+            __m256 mask = _mm256_and_ps(cmp_ge, cmp_le);    // Combine comparisons
+
+             __m256 da = _mm256_blendv_ps(zero, one, mask);
+
+            _mm256_store_ps(&grads[i], _mm256_mul_ps(da, dc));
+
+        }
 
         for (int i = 0; i < num_of_active_inputs; i++) {
             int input = active_inputs[i];
 
-            /*for (int j = 0; j < NEURONS; j++) {
-                float x = acculumator[j];
-                float dc = grads[j];
-                float da = activation_diff(x);
 
-                gradients->weights[input*NEURONS + j] += dc*da*0.5f;
-            }*/
+            for (int j = 0; j < NEURONS; j += 8) {
+                __m256 g0 = _mm256_load_ps(&grads[j]);
+                __m256 g1 = _mm256_load_ps(&gradients->weights[input*NEURONS + j]);
+
+                _mm256_store_ps(&gradients->weights[input*NEURONS + j], _mm256_add_ps(g0, g1));
+
+            }
+        }
+
+        for (int i = 0; i < NEURONS; i += 8) {
+            __m256 g0 = _mm256_load_ps(&grads[i]);
+            __m256 g1 = _mm256_load_ps(&gradients->biases[i]);
+
+            _mm256_store_ps(&gradients->biases[i], _mm256_add_ps(g0, g1));
+
+        }
+
+        /*for (int i = 0; i < num_of_active_inputs; i++) {
+            int input = active_inputs[i];
 
             for (int j = 0; j < NEURONS; j += 8) {
                 __m256 x = _mm256_load_ps(&acculumator[j]);
@@ -324,28 +340,15 @@ struct training_perspective
                 __m256 cmp_le = _mm256_cmp_ps(x, one, _CMP_LE_OS);  // x <= 1.0f
                 __m256 mask = _mm256_and_ps(cmp_ge, cmp_le);    // Combine comparisons
 
-                 __m256 da = _mm256_blendv_ps(zero, half, mask);
+                 __m256 da = _mm256_blendv_ps(zero, one, mask);
 
 
                  g = _mm256_fmadd_ps(da, dc, g);
-
-                //__m256 tmp = _mm256_mul_ps(da, dc);
-                //g = _mm256_add_ps(g, tmp);
 
                 _mm256_store_ps(&gradients->weights[input*NEURONS + j], g);
 
             }
         }
-
-
-        /*for (int i = 0; i < NEURONS; i++) {
-            float x = acculumator[i];
-            float dc = grads[i];
-            float da = activation_diff(x);
-
-            gradients->biases[i] += dc*da*0.5f;
-        }*/
-
 
         for (int i = 0; i < NEURONS; i += 8) {
             __m256 x = _mm256_load_ps(&acculumator[i]);
@@ -356,16 +359,13 @@ struct training_perspective
             __m256 cmp_le = _mm256_cmp_ps(x, one, _CMP_LE_OS);  // x <= 1.0f
             __m256 mask = _mm256_and_ps(cmp_ge, cmp_le);    // Combine comparisons
 
-            __m256 da = _mm256_blendv_ps(zero, half, mask);
+            __m256 da = _mm256_blendv_ps(zero, one, mask);
 
 
             g = _mm256_fmadd_ps(da, dc, g);
-            //__m256 tmp = _mm256_mul_ps(da, dc);
-            //g = _mm256_add_ps(g, tmp);
-
             _mm256_store_ps(&gradients->biases[i], g);
 
-        }
+        }*/
     }
 
     float *neurons;
