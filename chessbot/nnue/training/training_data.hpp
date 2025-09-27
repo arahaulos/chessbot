@@ -90,4 +90,6 @@ private:
 struct training_data_utility
 {
     static void convert_training_data(std::vector<std::string> selfplay_directories, std::string output_folder, size_t output_file_sizes_MB);
+
+    static float find_scaling_factor_for_data(const std::vector<training_position> &data);
 };

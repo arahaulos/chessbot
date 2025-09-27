@@ -49,12 +49,14 @@ float training_network::evaluate(const board_state &s)
     output_bucket = encode_output_bucket(non_pawn_pieces);
 
     if (s.get_turn() == WHITE) {
-        output_layer.update(output_bucket, white_side.neurons, black_side.neurons);
+        layer1.update(output_bucket, white_side.neurons, black_side.neurons);
     } else {
-        output_layer.update(output_bucket, black_side.neurons, white_side.neurons);
+        layer1.update(output_bucket, black_side.neurons, white_side.neurons);
     }
+    layer2.update(output_bucket, layer1.neurons);
+    output_layer.update(output_bucket, layer2.neurons);
 
-    return output_layer.neurons[output_bucket];
+    return output_layer.neurons[0];
 }
 
 float training_network::evaluate(const training_position &tp)
@@ -129,11 +131,15 @@ float training_network::evaluate(const training_position &tp)
     white_side.update();
     black_side.update();
     if (tp.get_turn() == WHITE) {
-        output_layer.update(output_bucket, white_side.neurons, black_side.neurons);
+        layer1.update(output_bucket, white_side.neurons, black_side.neurons);
     } else {
-        output_layer.update(output_bucket, black_side.neurons, white_side.neurons);
+        layer1.update(output_bucket, black_side.neurons, white_side.neurons);
     }
-    return output_layer.neurons[output_bucket];
+
+    layer2.update(output_bucket, layer1.neurons);
+    output_layer.update(output_bucket, layer2.neurons);
+
+    return output_layer.neurons[0];
 }
 
 void training_weights::save_file(std::string path)
@@ -141,6 +147,8 @@ void training_weights::save_file(std::string path)
     std::ofstream file(path.c_str(), std::ios::binary);
     if (file.is_open()) {
         perspective_weights.save(file);
+        layer1_weights.save(file);
+        layer2_weights.save(file);
         output_weights.save(file);
     }
     file.close();
@@ -151,6 +159,8 @@ void training_weights::load_file(std::string path)
     std::ifstream file(path.c_str(), std::ios::binary);
     if (file.is_open()) {
         perspective_weights.load(file);
+        layer1_weights.load(file);
+        layer2_weights.load(file);
         output_weights.load(file);
     }
     file.close();
@@ -159,10 +169,15 @@ void training_weights::load_file(std::string path)
 
 void training_weights::save_quantized(std::string path)
 {
-    int16_t *weights = new int16_t[perspective_weights.num_of_quantized_params() + output_weights.num_of_quantized_params()];
+    int16_t *weights = new int16_t[perspective_weights.num_of_quantized_params() +
+                                   layer1_weights.num_of_quantized_params() +
+                                   layer2_weights.num_of_quantized_params() +
+                                   output_weights.num_of_quantized_params()];
     size_t index = 0;
 
     perspective_weights.save_quantized(weights, index);
+    layer1_weights.save_quantized(weights, index);
+    layer2_weights.save_quantized(weights, index);
     output_weights.save_quantized(weights, index);
 
     uint8_t *encoded_data;

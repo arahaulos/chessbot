@@ -4,21 +4,29 @@
 #include <iostream>
 
 
+
 template <typename T, size_t N>
 class cache
 {
 public:
     cache() {
         size = MB_to_size(N);
-        data = new T[size];
+
+        allocate_data(size, true);
     }
     ~cache() {
-        delete [] data;
+        free_data();
     }
 
     cache(const cache<T, N> &other) {
         size = other.size;
-        data = new T[size];
+
+        allocate_data(size, false);
+
+        /*for (uint64_t i = 0; i < size; i++) {
+            new (&data[i])T(other.data[i]);
+        }*/
+
         for (uint64_t i = 0; i < size; i++) {
             data[i] = other.data[i];
         }
@@ -27,14 +35,16 @@ public:
     cache<T,N>& operator = (cache<T, N> other) {
         std::swap(other.data, data);
         std::swap(other.size, size);
+        std::swap(other.memory, memory);
 
         return *this;
     }
 
     void resize(int size_MB) {
-        delete [] data;
+        free_data();
+
         size = MB_to_size(size_MB);
-        data = new T[size];
+        allocate_data(size, true);
     }
 
 
@@ -54,6 +64,31 @@ public:
         return size_to_MB(size);
     }
 private:
+
+    void allocate_data(int s, bool construct)
+    {
+        memory = new uint8_t[s*sizeof(T)+64];
+        data = (T*)((size_t)memory + 64 - ((size_t)memory % 64));
+
+        for (int i = 0; i < s; i++) {
+            data[i].clear();
+        }
+
+        /*if (construct) {
+            for (int i = 0; i < s; i++) {
+                new (&data[i])T();
+            }
+        }*/
+    }
+
+    void free_data()
+    {
+        /*for (int i = 0; i < size; i++) {
+            data[i].~T();
+        }*/
+        delete [] memory;
+    }
+
     uint64_t size_to_MB(uint64_t s) const {
         return ((s * sizeof(T)) / (1024*1024));
     }
@@ -61,7 +96,9 @@ private:
         return  ((s * 1024 * 1024) / sizeof(T));
     }
 
-
     T *data;
     uint64_t size;
+
+private:
+    uint8_t *memory;
 };

@@ -19,7 +19,7 @@ struct perft
     int run_perft(board_state &state, int depth, bool debug);
 private:
     uint64_t performance_perft(board_state &state, int depth);
-    uint64_t debug_perft(board_state &state, int depth, int ply, search_context &sc, int32_t &eval_sum);
+    uint64_t debug_perft(board_state &state, int depth, int ply, search_context &sc);
 
     cache<tt_bucket, 1> test_perft_tt;
 

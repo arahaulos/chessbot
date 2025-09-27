@@ -2,6 +2,18 @@
 #include "time_managment.hpp"
 #include <sstream>
 
+
+int32_t scale_eval(int32_t score)
+{
+    constexpr int scaling_factor = 719;
+
+    if (!is_mate_score(score)) {
+        return (score * 400) / scaling_factor;
+    } else {
+        return score;
+    }
+}
+
 std::vector<std::string> split_string(std::string str, char d)
 {
     std::vector<std::string> splitted_strings;
@@ -48,6 +60,8 @@ bool uci_interface::exit()
 
 void uci_interface::start()
 {
+    std::cout << "Starting UCI" << std::endl;
+
     running = true;
     uci_thread = std::thread(&uci_interface::main_loop, this);
     input_thread = std::thread(&uci_interface::input_loop, this);
@@ -316,12 +330,11 @@ void uci_interface::send_info_strings(int search_time)
             search_info info = search_instance->get_search_info(i);
 
             for (int j = 0; j < multi_pv; j++) {
-                int32_t eval = info.lines[j]->score;
+                int32_t eval = scale_eval(info.lines[j]->score);
 
                 if (eval == MIN_EVAL) {
                     continue;
                 }
-                //std::string bm = info.lines[j]->moves[0].to_uci();
 
                 std::stringstream ss;
                 ss << "info depth ";
@@ -353,8 +366,6 @@ void uci_interface::send_info_strings(int search_time)
                 ss << nps;
                 ss << " hashfull ";
                 ss << hashfull;
-                //ss << " bm ";
-                //ss << bm;
 
                 ss << " time ";
                 ss << search_time;

@@ -14,7 +14,7 @@ void game_state::reset()
 {
     state.set_initial_state();
     moves_played = std::vector<chess_move>();
-    unmoves = std::vector<unmove_data>();
+    unmoves = std::vector<unmake_restore>();
 
     error = NO_ERROR;
 }
@@ -51,7 +51,7 @@ void game_state::unmove()
 {
     if (!moves_played.empty()) {
         chess_move last_move = moves_played.back();
-        unmove_data last_restore = unmoves.back();
+        unmake_restore last_restore = unmoves.back();
 
         moves_played.pop_back();
         unmoves.pop_back();
@@ -79,7 +79,7 @@ game_win_type_t game_state::make_move(const chess_move &mov)
     std::vector<square_index> valid_moves = state.get_legal_moves(mov.from);
 
     if (std::find(valid_moves.begin(), valid_moves.end(), mov.to) != std::end(valid_moves)) {
-        unmove_data restore = state.make_move(mov);
+        unmake_restore restore = state.make_move(mov);
 
         moves_played.push_back(mov);
         unmoves.push_back(restore);

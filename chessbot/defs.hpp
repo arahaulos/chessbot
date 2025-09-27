@@ -3,6 +3,14 @@
 #include <limits>
 
 
+constexpr uint64_t PAWN_STRUCTURE_HASH_MASK = 0xFFFFF;
+constexpr uint64_t MINOR_STRUCTURE_HASH_MASK = 0xFFFFF00000;
+constexpr uint64_t MAJOR_STRUCTURE_HASH_MASK = 0xFFFFF0000000000;
+
+constexpr uint64_t PAWN_STRUCTURE_HASH_SHIFT = 0;
+constexpr uint64_t MINOR_STRUCTURE_HASH_SHIFT = 20;
+constexpr uint64_t MAJOR_STRUCTURE_HASH_SHIFT = 40;
+
 constexpr int MAX_DEPTH = 128;
 constexpr int KILLER_MOVE_SLOTS = 2;
 constexpr int MAX_THREADS = 32;
@@ -13,7 +21,6 @@ constexpr int MAX_MULTI_PV = 16;
 constexpr int TT_SIZE = 64;
 constexpr int EVAL_CACHE_SIZE = 4;
 constexpr int DEFAULT_THREADS = 1;
-constexpr int TT_ENTRIES_IN_BUCKET = 4;
 
 constexpr int BOARD_WIDTH = 8;
 constexpr int BOARD_HEIGHT = 8;

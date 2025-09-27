@@ -135,7 +135,7 @@ void selfplay_worker::play(std::atomic<int> &games, int d, int n, bool random, s
         game_win_type_t win_status = NO_WIN;
         game_win_type_t mate_found_win = NO_WIN;
 
-        int random_moves = (random ? 8 : 16);
+        int random_moves = (random ? 8 : 14);
 
         double total_depth = 0;
         int searched_moves = 0;
@@ -153,7 +153,7 @@ void selfplay_worker::play(std::atomic<int> &games, int d, int n, bool random, s
                     if (bot->get_multi_pv() != multipv) {
                         bot->set_multi_pv(multipv);
                     }
-                    bot->fast_search(game.get_state(), d, n);
+                    bot->fast_search(game.get_state(), d/2, n);
 
                     int32_t best_score = bot->get_evaluation();
 
@@ -496,18 +496,19 @@ void test_worker::play(std::atomic<int> &games, int base_time, int time_inc, boo
         while (true) {
             chess_move mov;
             if ((bot0_playing_black && game.get_turn() == BLACK) || (!bot0_playing_black && game.get_turn() == WHITE)) {
-                /*int target_time = get_target_search_time(bot0_timeleft, time_inc);
+                int target_time = get_target_search_time(bot0_timeleft, time_inc);
                 bot0_timeleft = bot0_timeleft - target_time + time_inc;
-                mov = bot0->search_time(game.get_state(), target_time, nullptr);*/
-                time_man->init(bot0_timeleft, time_inc);
-                mov = bot0->search_time(game.get_state(), 10000, time_man);
-                bot0_timeleft = bot0_timeleft - time_man->get_time_used() + time_inc;
+                mov = bot0->search_time(game.get_state(), target_time, nullptr);
+
+                //time_man->init(bot0_timeleft, time_inc);
+                //mov = bot0->search_time(game.get_state(), 10000, time_man);
+                //bot0_timeleft = bot0_timeleft - time_man->get_time_used() + time_inc;
 
                 int d = bot0->get_depth();
 
                 if (d > 1) {
                     bot0_depth += d;
-                    bot0_nps += bot0->get_node_count() / (time_man->get_time_used()+1);
+                    bot0_nps += bot0->get_node_count() / target_time;//(time_man->get_time_used()+1);
                     bot0_moves += 1;
                 }
             } else {
@@ -531,18 +532,18 @@ void test_worker::play(std::atomic<int> &games, int base_time, int time_inc, boo
                         bot1_moves += 1;
                     }
                 } else {
-                    /*int target_time = get_target_search_time(bot1_timeleft, time_inc);
+                    int target_time = get_target_search_time(bot1_timeleft, time_inc);
                     bot1_timeleft = bot1_timeleft - target_time + time_inc;
-                    mov = bot1->search_time(game.get_state(), target_time, nullptr);*/
+                    mov = bot1->search_time(game.get_state(), target_time, nullptr);
 
-                    time_man->init(bot1_timeleft, time_inc);
-                    mov = bot1->search_time(game.get_state(), 10000, time_man);
-                    bot1_timeleft = bot1_timeleft - time_man->get_time_used() + time_inc;
+                    //time_man->init(bot1_timeleft, time_inc);
+                    //mov = bot1->search_time(game.get_state(), 10000, time_man);
+                    //bot1_timeleft = bot1_timeleft - time_man->get_time_used() + time_inc;
 
                     int d = bot1->get_depth();
                     if (d > 1) {
                         bot1_depth += d;
-                        bot1_nps += bot1->get_node_count() / (time_man->get_time_used()+1);
+                        bot1_nps += bot1->get_node_count() / target_time;//(time_man->get_time_used()+1);
                         bot1_moves += 1;
                     }
                 }

@@ -19,14 +19,6 @@ int perft::run_perft(board_state &state, int depth, bool debug)
             }
         }
 
-        std::shared_ptr<nnue_weights> weights = std::make_shared<nnue_weights>();
-
-        state.nnue = std::make_shared<nnue_network>(weights);
-        state.nnue->evaluate(state);
-
-        int32_t eval_sum = 0;
-
-
         search_context *sc = new search_context(nullptr);
         sc->history.conthist_stack = sc->conthist;
         sc->history.move_stack = sc->moves;
@@ -36,7 +28,7 @@ int perft::run_perft(board_state &state, int depth, bool debug)
 
         std::chrono::high_resolution_clock::time_point t1 = std::chrono::high_resolution_clock::now();
 
-        uint64_t nodes = debug_perft(state, depth, 0, *sc, eval_sum);
+        uint64_t nodes = debug_perft(state, depth, 0, *sc);
 
         std::chrono::high_resolution_clock::time_point t2 = std::chrono::high_resolution_clock::now();
 
@@ -49,11 +41,8 @@ int perft::run_perft(board_state &state, int depth, bool debug)
             std::cout << "Performance: " << (float)(nodes / ms.count()) / 1000 << " million moves per second" << std::endl;
         }
         std::cout << "TT hits: " << sc->stats.cache_hits << std::endl;
-        std::cout << "Eval sum: " << eval_sum << std::endl;
 
         delete sc;
-
-        state.nnue = nullptr;
 
         return nodes;
 
@@ -97,7 +86,7 @@ uint64_t perft::performance_perft(board_state &state, int depth)
 
         player_type_t turn = state.get_turn();
 
-        unmove_data restore = state.make_move(m);
+        unmake_restore restore = state.make_move(m);
 
         if (!state.in_check(turn)) {
             c += performance_perft(state, depth-1);
@@ -110,12 +99,8 @@ uint64_t perft::performance_perft(board_state &state, int depth)
     return c;
 }
 
-uint64_t perft::debug_perft(board_state &state, int depth, int ply, search_context &sc, int32_t &eval_sum)
+uint64_t perft::debug_perft(board_state &state, int depth, int ply, search_context &sc)
 {
-    /*if (state.zhash != hashgen.get_hash(state, state.get_turn())) {
-        std::cout << "Hash mismatch" << std::endl;
-    }*/
-
     int32_t tt_score;
     int tt_depth;
     chess_move tt_move = chess_move::null_move();
@@ -130,11 +115,10 @@ uint64_t perft::debug_perft(board_state &state, int depth, int ply, search_conte
 
 
     if (depth == 0) {
-        //eval_sum += state.nnue->evaluate(state.get_turn());
         return 1;
     }
 
-    move_picker picker;
+    move_picker &picker = sc.move_pickers[ply];
     picker.init(state, ply, tt_move, sc.history, true);
 
     chess_move best_move = chess_move::null_move();
@@ -186,9 +170,9 @@ uint64_t perft::debug_perft(board_state &state, int depth, int ply, search_conte
 
         test_perft_tt.prefetch(new_zhash);
 
-        unmove_data restore = state.make_move(m, new_zhash);
+        unmake_restore restore = state.make_move(m, new_zhash);
 
-        c = debug_perft(state, depth-1, ply+1, sc, eval_sum);
+        c = debug_perft(state, depth-1, ply+1, sc);
 
         state.unmake_move(m, restore);
 

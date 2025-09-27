@@ -24,7 +24,7 @@ float evaluation_wdl_mse(const std::vector<training_position> &data, float scali
 
 
 
-float find_scaling_factor_for_data(const std::vector<training_position> &data)
+float training_data_utility::find_scaling_factor_for_data(const std::vector<training_position> &data)
 {
     constexpr float min_scaling = 200.0f;
     constexpr float max_scaling = 800.0f;
@@ -55,35 +55,19 @@ float find_scaling_factor_for_data(const std::vector<training_position> &data)
 void filter_and_convert_data(std::vector<selfplay_result> &data_in, std::vector<training_position> &data_out)
 {
     //This function filters selfplay results
-
     std::vector<training_position> data;
 
     data.reserve(data_in.size());
 
-    bool is_tactical0 = false;
-    /*bool is_tactical1 = false;
-    bool is_tactical2 = false;*/
-
-    //training_position pos_to_add = data_in[0];
 
     board_state state;
     for (size_t i = 0; i < data_in.size(); i++) {
         state.load_fen(data_in[i].fen);
 
-        //float result = (state.get_turn() == WHITE ? data_in[i].wdl : 1.0f-data_in[i].wdl);
-
-        is_tactical0 = (state.get_square(data_in[i].bm.to).get_type() != EMPTY) || state.in_check(WHITE) || state.in_check(BLACK);
-
-        //bool wdl_eval_conflict = (result > 0.5f && data_in[i].eval < -300) || (result < 0.5f && data_in[i].eval > 300);
-
-        if (!is_tactical0/* && !is_tactical1 && !is_tactical2*/) {
-            //data.push_back(pos_to_add);
+        bool is_tactical = (state.get_square(data_in[i].bm.to).get_type() != EMPTY) || state.in_check(WHITE) || state.in_check(BLACK);
+        if (!is_tactical) {
             data.emplace_back(state, data_in[i]);
         }
-
-        /*pos_to_add = training_position(state, data_in[i]);
-        is_tactical2 = is_tactical1;
-        is_tactical1 = is_tactical0;*/
 
         if ((i % 100000) == 0) {
             std::cout << "\rFiltering and converting data: " << (i*100)/data_in.size() << "%   ";
@@ -92,7 +76,7 @@ void filter_and_convert_data(std::vector<selfplay_result> &data_in, std::vector<
     std::cout << std::endl;
 
     std::vector<training_position> batch = get_random_batch(data, 20000);
-    float scaling_factor = find_scaling_factor_for_data(batch);
+    float scaling_factor = training_data_utility::find_scaling_factor_for_data(batch);
 
 
     data_out.reserve(data_out.size() + data.size());

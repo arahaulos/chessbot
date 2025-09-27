@@ -333,7 +333,7 @@ struct move_generator
         bitboard occupation = ~state.bitboards[EMPTY][0];
         bitboard mask = state.bitboards[EMPTY][0];
 
-        buffer_ptr = generate_pawn_advance(state, color, occupation, ~(uint64_t)0xFF000000000000FF, buffer_ptr);
+        buffer_ptr = generate_pawn_advance(state, color, occupation, ~0xFF000000000000FFull, buffer_ptr);
         buffer_ptr = generate_knight(state, color, occupation, mask, buffer_ptr);
         buffer_ptr = generate_bishop(state, color, occupation, mask, buffer_ptr);
         buffer_ptr = generate_rook(state, color, occupation, mask, buffer_ptr);
@@ -350,7 +350,7 @@ struct move_generator
 
         bitboard occupation = ~state.bitboards[EMPTY][0];
 
-        buffer_ptr = generate_pawn_advance(state, color, occupation, (uint64_t)0xFF000000000000FF, buffer_ptr);
+        buffer_ptr = generate_pawn_advance(state, color, occupation, 0xFF000000000000FFull, buffer_ptr);
 
         return buffer_ptr - movelist;
     }
@@ -415,7 +415,7 @@ struct move_generator
             bitboard moves = piece_quiet_moves(state, p, index);
 
             if (p.get_type() == PAWN) {
-                moves &= ~(uint64_t)0xFF000000000000FF;
+                moves &= ~0xFF000000000000FFull;
             }
 
             while (moves) {
@@ -512,7 +512,7 @@ struct move_generator
                 continue;
             }
 
-            bool is_promotion = (movelist[i].promotion != 0) || (state.get_square(movelist[i].from).get_type() == PAWN && (movelist[i].to.get_y() == 1 || movelist[i].to.get_y() == 7));
+            bool is_promotion = (movelist[i].promotion != 0) || (state.get_square(movelist[i].from).get_type() == PAWN && (movelist[i].to.get_y() == 0 || movelist[i].to.get_y() == 7));
             bool is_en_passant = state.get_square(movelist[i].from).get_type() == PAWN && movelist[i].to == state.en_passant_square && (state.flags & EN_PASSANT_AVAILABLE) != 0;
             bool is_capture = state.get_square(movelist[i].to).get_type() != EMPTY;
 

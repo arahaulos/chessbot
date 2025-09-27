@@ -226,6 +226,7 @@ chess_move alphabeta_search::search_time(board_state &state, uint64_t time_ms, s
 void alphabeta_search::iterative_search(int max_depth)
 {
     for (int i = 0; i < number_of_helper_threads+1; i++) {
+        thread_datas[i]->nnue->test_flag = test_flag;
         thread_datas[i]->presearch(state_to_search);
     }
 
@@ -290,14 +291,11 @@ void alphabeta_search::iterative_search(int max_depth)
 
         std::chrono::high_resolution_clock::time_point t3 = std::chrono::high_resolution_clock::now();
 
-        auto ms = std::chrono::duration_cast<std::chrono::milliseconds>( t3 - t2 );
-
-        uint64_t nodes = all_threads_stats.nodes - total_nodes_searched;
-
-        nps = (nodes*1000) / (ms.count()+1);
+        nps = ((all_threads_stats.nodes - total_nodes_searched)*1000) / (std::chrono::duration_cast<std::chrono::milliseconds>( t3 - t2 ).count()+1);
 
         total_nodes_searched = all_threads_stats.nodes;
 
+        //std::cout << thread_datas[0]->nnue->total_active_neurons / (thread_datas[0]->nnue->total_evaluations+1) << std::endl;
 
         if (!searching_flag || (limit_nodes != 0 && all_threads_stats.nodes > limit_nodes && depth >= min_depth)) {
             break;
@@ -314,8 +312,9 @@ void alphabeta_search::iterative_search(int max_depth)
 
     ready_flag = true;
 
-    /*if (all_threads_stats.tempo_samples > 0) {
-        std::cout << all_threads_stats.avg_tempo / all_threads_stats.tempo_samples << std::endl;
+   /* if (test_flag) {
+        //std::cout << all_threads_stats.avg_history_score / all_threads_stats.history_score_samples  << std::endl;
+        all_threads_stats.print_history_distribution();
     }*/
 }
 
@@ -358,11 +357,12 @@ void alphabeta_search::aspirated_search(int depth)
     nominal_search_depth = depth;
 
     if (depth > 4) {
+        int64_t window_expansion = 25;
+
         int64_t window_beta_limit = MAX_EVAL-1;
         int64_t window_alpha_limit = MIN_EVAL+1;
-        int64_t window_alpha = root_search_pv[num_of_pvs-1].score - 25;
-        int64_t window_beta = root_search_pv[0].score + 25;
-        int64_t window_expansion = 50;
+        int64_t window_alpha = root_search_pv[num_of_pvs-1].score - window_expansion;
+        int64_t window_beta = root_search_pv[0].score + window_expansion;
 
         while (searching_flag) {
             sort_root_moves(root_moves, root_search_pv[0].moves[0]);
@@ -378,10 +378,8 @@ void alphabeta_search::aspirated_search(int depth)
             //Adjust window when search failed high or low
             if (root_search_pv[0].score >= window_beta) {
                 window_beta = std::min((int64_t)root_search_pv[0].score + window_expansion, window_beta_limit);
-                window_expansion *= 2.0f;
             } else if (root_search_pv[num_of_pvs-1].score <= window_alpha) {
                 window_alpha = std::max((int64_t)root_search_pv[num_of_pvs-1].score - window_expansion, window_alpha_limit);
-                window_expansion *= 2.0f;
             } else {
                 break;
             }
@@ -389,6 +387,8 @@ void alphabeta_search::aspirated_search(int depth)
             if (limit_nodes != 0 && all_threads_stats.nodes > limit_nodes && depth > min_depth) {
                 return;
             }
+
+            window_expansion *= 2;
         }
     } else {
         alphabeta_abort_flag = false;
@@ -439,7 +439,7 @@ void alphabeta_search::search_root(int32_t window_alpha, int32_t window_beta, in
 
         line.first(root_move);
 
-        unmove_data restore = sc.state.make_move(root_move);
+        unmake_restore restore = sc.state.make_move(root_move);
 
         int32_t pv_score = MAX_EVAL;
         for (int i = 0; i < num_of_pvs; i++) {
@@ -517,20 +517,17 @@ void alphabeta_search::search_root(int32_t window_alpha, int32_t window_beta, in
 int32_t alphabeta_search::static_evaluation(const board_state &state, player_type_t player, search_statistics &stats)
 {
     int32_t score;
-    if (eval_cache[state.zhash].read(state.zhash, score)) {
+    if (eval_cache[state.zhash].probe(state.zhash, score)) {
         stats.eval_cache_hits++;
     } else {
         stats.eval_cache_misses++;
 
-        score = state.nnue->evaluate(player, encode_output_bucket(state.get_non_pawn_pieces_bb()));
+        score = state.nnue->evaluate(player);
 
-        eval_cache[state.zhash].write(state.zhash, score);
+        eval_cache[state.zhash].store(state.zhash, score);
     }
-
     return score;
 }
-
-
 
 int32_t alphabeta_search::alphabeta(board_state &state, int32_t alpha, int32_t beta, int depth, int ply, search_context &sc, pv_table &pv, chess_move *skip_move, node_type_t expected_node_type)
 {
@@ -552,6 +549,7 @@ int32_t alphabeta_search::alphabeta(board_state &state, int32_t alpha, int32_t b
             ready_flag = true;
         }
     }
+
 
     if (state.check_repetition() >= 2 || state.half_move_clock >= 100 || state.is_insufficient_material()) {
         return 0;
@@ -595,6 +593,10 @@ int32_t alphabeta_search::alphabeta(board_state &state, int32_t alpha, int32_t b
         } else if (tt_node_type == ALL_NODE && tt_score <= alpha) {
             return tt_score;
         }
+    }
+
+    if (tt_hit) {
+        eval_cache[state.zhash].store(state.zhash, tt_static_eval);
     }
 
     bool in_check = state.in_check(state.get_turn());
@@ -677,7 +679,7 @@ int32_t alphabeta_search::alphabeta(board_state &state, int32_t alpha, int32_t b
         sc.conthist[ply] = sc.history.get_continuation_history_table_null(state.get_turn());
         sc.stats.nodes += 1;
 
-        unmove_data restore = state.make_null_move();
+        unmake_restore restore = state.make_null_move();
 
         int32_t null_score = -alphabeta(state, -beta, 1-beta, nmp_depth, ply+1, sc, line, nullptr, CUT_NODE);
 
@@ -772,6 +774,8 @@ int32_t alphabeta_search::alphabeta(board_state &state, int32_t alpha, int32_t b
     }
 
     move_picker &mpicker = sc.move_pickers[ply];
+
+    mpicker.good_quiet_treshold = sp.good_quiet_treshold;
     mpicker.init(state, ply, tt_move, sc.history, test_flag);
 
     chess_move best_move = chess_move::null_move();
@@ -779,6 +783,7 @@ int32_t alphabeta_search::alphabeta(board_state &state, int32_t alpha, int32_t b
     int node_type = ALL_NODE;
     chess_move mov;
     int move_type = MOVES_END;
+
 
     while ((move_type = mpicker.pick(mov)) != MOVES_END) {
         if (skip_move && mov == *skip_move) {
@@ -795,7 +800,9 @@ int32_t alphabeta_search::alphabeta(board_state &state, int32_t alpha, int32_t b
 
         int32_t history_score = (is_capture ? sc.history.get_capture_history(mov) : sc.history.get_quiet_history(ply, mov));
 
-        reductions -= history_score / sp.lmr_hist_adjust;
+        if (!is_capture) {
+            reductions -= std::clamp(history_score / sp.lmr_hist_adjust, -3, 3);
+        }
 
         //Forward pruning at low depth
         if (best_score != MIN_EVAL && !is_mate_score(best_score) && ply > 2) {
@@ -875,7 +882,6 @@ int32_t alphabeta_search::alphabeta(board_state &state, int32_t alpha, int32_t b
             if (move_type == KILLER_MOVE) {
                 reductions -= 1;
             }
-
             if (is_capture) {
                 reductions /= 2;
             }
@@ -890,7 +896,7 @@ int32_t alphabeta_search::alphabeta(board_state &state, int32_t alpha, int32_t b
         sc.reduction[ply] = (reduced_depth < new_depth ? reductions : 0);
         sc.stats.nodes += 1;
 
-        unmove_data restore = state.make_move(mov, next_hash);
+        unmake_restore restore = state.make_move(mov, next_hash);
 
         int32_t score = MIN_EVAL;
         if (is_pv) {
@@ -941,7 +947,7 @@ int32_t alphabeta_search::alphabeta(board_state &state, int32_t alpha, int32_t b
                 node_type = CUT_NODE;
 
                 if (depth > 5) {
-                    sc.stats.fail_high_index += (mpicker.legal_moves == 1);
+                    sc.stats.fail_high_index += mpicker.legal_moves;
                     sc.stats.fail_highs += 1;
                 }
 
@@ -972,6 +978,7 @@ int32_t alphabeta_search::alphabeta(board_state &state, int32_t alpha, int32_t b
             if ((node_type == CUT_NODE && raw_eval < best_score) ||
                 (node_type == ALL_NODE && raw_eval > best_score) ||
                  node_type == PV_NODE) {
+
                 sc.history.update_correction_history(state, best_score - raw_eval, depth);
             }
         }
@@ -1010,6 +1017,10 @@ int32_t alphabeta_search::quisearch(board_state &state, int32_t alpha, int32_t b
     int32_t tt_score = 0;
     int32_t tt_static_eval = 0;
     bool tt_hit = transposition_table[state.zhash].probe(state, state.zhash, tt_move, tt_depth, tt_node_type, tt_score, tt_static_eval, ply);
+
+    if (tt_hit) {
+        eval_cache[state.zhash].store(state.zhash, tt_static_eval);
+    }
 
     if (!is_pv &&
         tt_hit &&
@@ -1110,7 +1121,7 @@ int32_t alphabeta_search::quisearch(board_state &state, int32_t alpha, int32_t b
 
         sc.stats.nodes += 1;
 
-        unmove_data restore = state.make_move(mov, next_hash);
+        unmake_restore restore = state.make_move(mov, next_hash);
 
         int32_t score = -quisearch(state, -beta, -alpha, depth-1, ply+1, sc, is_pv);
 
@@ -1143,8 +1154,3 @@ int32_t alphabeta_search::quisearch(board_state &state, int32_t alpha, int32_t b
     }
     return best_score;
 }
-
-
-
-
-

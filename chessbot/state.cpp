@@ -5,29 +5,14 @@
 #include <sstream>
 #include <memory>
 
-static uint8_t initial_state[BOARD_SQUARES] =
-{
-    BLACK_ROOK, BLACK_KNIGHT, BLACK_BISHOP, BLACK_QUEEN, BLACK_KING, BLACK_BISHOP, BLACK_KNIGHT, BLACK_ROOK,
-    BLACK_PAWN, BLACK_PAWN,   BLACK_PAWN,   BLACK_PAWN,  BLACK_PAWN, BLACK_PAWN,   BLACK_PAWN,   BLACK_PAWN,
-    EMPTY,      EMPTY,        EMPTY,        EMPTY,       EMPTY,      EMPTY,        EMPTY,        EMPTY,
-    EMPTY,      EMPTY,        EMPTY,        EMPTY,       EMPTY,      EMPTY,        EMPTY,        EMPTY,
-    EMPTY,      EMPTY,        EMPTY,        EMPTY,       EMPTY,      EMPTY,        EMPTY,        EMPTY,
-    EMPTY,      EMPTY,        EMPTY,        EMPTY,       EMPTY,      EMPTY,        EMPTY,        EMPTY,
-    WHITE_PAWN, WHITE_PAWN,   WHITE_PAWN,   WHITE_PAWN,  WHITE_PAWN, WHITE_PAWN,   WHITE_PAWN,   WHITE_PAWN,
-    WHITE_ROOK, WHITE_KNIGHT, WHITE_BISHOP, WHITE_QUEEN, WHITE_KING, WHITE_BISHOP, WHITE_KNIGHT, WHITE_ROOK
-};
-
-
-
-
-
-unmove_data board_state::make_null_move() {
-    unmove_data restore;
-    restore.flags_restore = flags;
-    restore.en_passant_square_restore = en_passant_square;
-    restore.en_passant_target_square_restore = en_passant_target_square;
-    restore.half_move_clock_restore = half_move_clock;
-    restore.restore_zhash = zhash;
+unmake_restore board_state::make_null_move() {
+    unmake_restore restore;
+    restore.flags = flags;
+    restore.en_passant_square = en_passant_square;
+    restore.en_passant_target_square = en_passant_target_square;
+    restore.half_move_clock = half_move_clock;
+    restore.zhash = zhash;
+    restore.structure_hash = structure_hash;
 
     zhash = hashgen.next_turn_hash(zhash, *this);
 
@@ -41,22 +26,23 @@ unmove_data board_state::make_null_move() {
     return restore;
 }
 
-void board_state::unmake_null_move(unmove_data restore) {
-    flags = restore.flags_restore;
-    en_passant_square = restore.en_passant_square_restore;
-    en_passant_target_square = restore.en_passant_target_square_restore;
-    half_move_clock = restore.half_move_clock_restore;
-    zhash = restore.restore_zhash;
+void board_state::unmake_null_move(const unmake_restore &restore) {
+    flags = restore.flags;
+    en_passant_square = restore.en_passant_square;
+    en_passant_target_square = restore.en_passant_target_square;
+    half_move_clock = restore.half_move_clock;
+    zhash = restore.zhash;
+    structure_hash = restore.structure_hash;
 
     pop_hash_stack();
 }
 
-unmove_data board_state::make_move(chess_move m) {
+unmake_restore board_state::make_move(chess_move m) {
     return make_move(m, hashgen.update_hash(zhash, *this, m));
 }
 
 
-unmove_data board_state::make_move(chess_move m, uint64_t new_zhash) {
+unmake_restore board_state::make_move(chess_move m, uint64_t new_zhash) {
     piece p = get_square(m.from);
 
     bool needs_refresh = false;
@@ -70,25 +56,24 @@ unmove_data board_state::make_move(chess_move m, uint64_t new_zhash) {
             bool side_changed = (m.from.index & 0x4) != (m.to.index & 0x4);
 
             if (prev_bucket != new_bucket || side_changed) {
-
                 needs_refresh = true;
-
-                nnue->enable_incremental_updates(false, p.get_player());
             }
         }
     }
 
-    unmove_data restore;
-    restore.to_restore = get_square(m.to);
-    restore.from_restore = get_square(m.from);
-    restore.flags_restore = flags;
-    restore.en_passant_square_restore = en_passant_square;
-    restore.en_passant_target_square_restore = en_passant_target_square;
-    restore.half_move_clock_restore = half_move_clock;
+    unmake_restore restore;
+    restore.to = get_square(m.to);
+    restore.from = get_square(m.from);
+    restore.flags = flags;
+    restore.en_passant_square = en_passant_square;
+    restore.en_passant_target_square = en_passant_target_square;
+    restore.half_move_clock = half_move_clock;
     restore.en_passant_used = false;
-    restore.restore_zhash = zhash;
+    restore.zhash = zhash;
+    restore.structure_hash = structure_hash;
 
     zhash = new_zhash;
+    structure_hash = hashgen.update_structure_hash(structure_hash, *this, m);
 
     bool irreversible = (get_square(m.to).get_type() != EMPTY);
 
@@ -112,7 +97,7 @@ unmove_data board_state::make_move(chess_move m, uint64_t new_zhash) {
                 en_passant_target_square = m.to;
                 flags |= EN_PASSANT_AVAILABLE;
             }
-        } else if (m.to == en_passant_square && ((restore.flags_restore & EN_PASSANT_AVAILABLE) != 0)) {
+        } else if (m.to == en_passant_square && ((restore.flags & EN_PASSANT_AVAILABLE) != 0)) {
             set_square(en_passant_target_square, piece(WHITE, EMPTY));
             restore.en_passant_used = true;
         }
@@ -164,6 +149,11 @@ unmove_data board_state::make_move(chess_move m, uint64_t new_zhash) {
     }
 
 
+    if (nnue && m.promotion == EMPTY) {
+        flags &= ~INCREMENT_NNUE;
+        nnue->move_piece(p, get_square(m.to), m.from, m.to);
+    }
+
     set_square(m.to, p);
     set_square(m.from, piece(WHITE, EMPTY));
 
@@ -179,19 +169,18 @@ unmove_data board_state::make_move(chess_move m, uint64_t new_zhash) {
         nnue->refresh(*this, p.get_player());
     }
 
-    flags &= ~INCREMENT_NNUE;
-
     return restore;
 }
 
-void board_state::unmake_move(chess_move m, unmove_data restore) {
-    set_square(m.from, restore.from_restore);
-    set_square(m.to, restore.to_restore);
-    flags = restore.flags_restore & (~INCREMENT_NNUE);
-    en_passant_square = restore.en_passant_square_restore;
-    en_passant_target_square = restore.en_passant_target_square_restore;
-    half_move_clock = restore.half_move_clock_restore;
-    zhash = restore.restore_zhash;
+void board_state::unmake_move(chess_move m, const unmake_restore &restore) {
+    flags = restore.flags & (~INCREMENT_NNUE);
+    set_square(m.from, restore.from);
+    set_square(m.to, restore.to);
+    en_passant_square = restore.en_passant_square;
+    en_passant_target_square = restore.en_passant_target_square;
+    half_move_clock = restore.half_move_clock;
+    zhash = restore.zhash;
+    structure_hash = restore.structure_hash;
 
     if (get_square(m.from).get_type() == KING) {
         if (get_square(m.from).get_player() == WHITE) {
@@ -243,37 +232,12 @@ void board_state::init_clear()
     recalculate_bitboards();
 
     zhash = hashgen.get_hash(*this, get_turn());
+    structure_hash = hashgen.get_structure_hash(*this, get_turn());
 }
 
 void board_state::set_initial_state()
 {
-    init_clear();
-
-    flags = BLACK_QSIDE_CASTLE_VALID | BLACK_KSIDE_CASTLE_VALID | WHITE_QSIDE_CASTLE_VALID | WHITE_KSIDE_CASTLE_VALID;
-
-    for (int i = 0; i < BOARD_SQUARES; i++) {
-        board[i] = piece(static_cast<piece_player_type_t>(initial_state[i]));
-    }
-
-    for (int y = 0; y < BOARD_HEIGHT; y++) {
-        for (int x = 0; x < BOARD_WIDTH; x++) {
-            square_index i(x, y);
-            piece p = get_square(i);
-            if (p.get_player() == WHITE) {
-                if (p.get_type() == KING) {
-                    white_king_square = i;
-                }
-            } else {
-                if (p.get_type() == KING) {
-                    black_king_square = i;
-                }
-            }
-        }
-    }
-
-    recalculate_bitboards();
-
-    zhash = hashgen.get_hash(*this, get_turn());
+    load_fen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
 }
 
 std::vector<square_index> board_state::get_legal_moves(square_index pos) const {
@@ -438,6 +402,7 @@ void board_state::load_fen(std::string fen_str)
     recalculate_bitboards();
 
     zhash = hashgen.get_hash(*this, get_turn());
+    structure_hash = hashgen.get_structure_hash(*this, get_turn());
 }
 
 
@@ -544,6 +509,23 @@ void board_state::recalculate_bitboards()
 
         pieces_by_color[color] |= bb;
     }
+
+
+    material_conf = 0;
+    material_conf |= pop_count(bitboards[PAWN][0]) << 0;
+    material_conf |= pop_count(bitboards[PAWN][1]) << 4;
+
+    material_conf |= pop_count(bitboards[KNIGHT][0]) << 8;
+    material_conf |= pop_count(bitboards[KNIGHT][1]) << 11;
+
+    material_conf |= pop_count(bitboards[BISHOP][0]) << 14;
+    material_conf |= pop_count(bitboards[BISHOP][1]) << 17;
+
+    material_conf |= pop_count(bitboards[ROOK][0]) << 20;
+    material_conf |= pop_count(bitboards[ROOK][1]) << 23;
+
+    material_conf |= pop_count(bitboards[QUEEN][0]) << 26;
+    material_conf |= pop_count(bitboards[QUEEN][1]) << 29;
 }
 
 

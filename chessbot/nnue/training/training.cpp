@@ -37,13 +37,25 @@ void init_weights(training_weights &weights, bool init_perspectives_weights)
     }
 
 
-    float output_deviation = sqrt(1.0f / weights.perspective_weights.num_of_biases());
+    float layer1_deviation = sqrt(1.0f / num_perspective_neurons);
+    float layer2_deviation = sqrt(2.0f / layer1_neurons);
+    float output_deviation = sqrt(2.0f / layer2_neurons);
+
     float perspective_deviation = sqrt(2.0f / 768.0f);
 
 
     randomize_floats(weights.output_weights.weights, weights.output_weights.num_of_weights(), 0, output_deviation, gen);
     randomize_floats(weights.output_weights.biases, weights.output_weights.num_of_biases(), 0, output_deviation, gen);
 
+    randomize_floats(weights.layer2_weights.weights, weights.layer2_weights.num_of_weights(), 0, layer2_deviation, gen);
+    randomize_floats(weights.layer2_weights.biases, weights.layer2_weights.num_of_biases(), 0, layer2_deviation, gen);
+
+    randomize_floats(weights.layer1_weights.weights, weights.layer1_weights.num_of_weights(), 0, layer1_deviation, gen);
+    randomize_floats(weights.layer1_weights.biases, weights.layer1_weights.num_of_biases(), 0, layer1_deviation, gen);
+
+    weights.output_weights.broadcast_bucket_weights(0);
+    weights.layer2_weights.broadcast_bucket_weights(0);
+    weights.layer1_weights.broadcast_bucket_weights(0);
 
     if (init_perspectives_weights) {
         randomize_floats(weights.perspective_weights.biases, weights.perspective_weights.num_of_biases(), 0, perspective_deviation, gen);
@@ -72,12 +84,15 @@ void init_weights(training_weights &weights, bool init_perspectives_weights)
 
 void back_propagate(training_network &net, training_weights &grad, float loss_delta, player_type_t stm)
 {
-    net.output_layer.grads[net.output_bucket] = loss_delta;
+    net.output_layer.grads[0] = loss_delta;
+
+    net.output_layer.back_propagate(net.output_bucket, &grad.output_weights, net.layer2.grads, net.layer2.neurons);
+    net.layer2.back_propagate(net.output_bucket, &grad.layer2_weights, net.layer1.grads, net.layer1.neurons);
 
     if (stm == WHITE) {
-        net.output_layer.back_propagate(net.output_bucket, &grad.output_weights, net.white_side.grads, net.black_side.grads, net.white_side.neurons, net.black_side.neurons);
+        net.layer1.back_propagate(net.output_bucket, &grad.layer1_weights, net.white_side.grads, net.black_side.grads, net.white_side.neurons, net.black_side.neurons);
     } else {
-        net.output_layer.back_propagate(net.output_bucket, &grad.output_weights, net.black_side.grads, net.white_side.grads, net.black_side.neurons, net.white_side.neurons);
+        net.layer1.back_propagate(net.output_bucket, &grad.layer1_weights, net.black_side.grads, net.white_side.grads, net.black_side.neurons, net.white_side.neurons);
     }
 
     net.white_side.back_propagate(&grad.perspective_weights);
@@ -214,6 +229,10 @@ struct worker_thread
                 corrected_second_moment->mult(*second_moment, 1.0f / (1.0f - std::pow(beta2, step)), thread_id, pool_size);
             } else if (operation == WORK_RMSPROP) {
                 net.weights->output_weights.rmsprop(&corrected_first_moment->output_weights, &corrected_second_moment->output_weights, learning_rate, thread_id, pool_size);
+
+                net.weights->layer2_weights.rmsprop(&corrected_first_moment->layer2_weights, &corrected_second_moment->layer2_weights, learning_rate, thread_id, pool_size);
+                net.weights->layer1_weights.rmsprop(&corrected_first_moment->layer1_weights, &corrected_second_moment->layer1_weights, learning_rate, thread_id, pool_size);
+
                 net.weights->perspective_weights.rmsprop(&corrected_first_moment->perspective_weights, &corrected_second_moment->perspective_weights, learning_rate, thread_id, pool_size);
             }
 
@@ -365,103 +384,6 @@ private:
     int steps;
 };
 
-
-void nnue_trainer::test_nets(std::string training_net_file, std::string quantized_net_file, std::vector<selfplay_result> &test_set)
-{
-    std::cout << "Testing networks." << std::endl;
-
-    std::cout << "Loading training nnue..." << std::endl;
-
-    std::shared_ptr<training_weights> training_nnue_weights = std::make_shared<training_weights>();
-    training_nnue_weights->load_file(training_net_file);
-    training_network training_nnue(training_nnue_weights);
-
-    training_nnue_weights->save_quantized(quantized_net_file);
-
-    std::cout << "Loading quantized nnue..." << std::endl;
-
-    std::shared_ptr<nnue_weights> quantized_nnue_weights = std::make_shared<nnue_weights>();
-    quantized_nnue_weights->load(quantized_net_file);
-    nnue_network quantized_nnue(quantized_nnue_weights);
-
-
-    float avg_error_nnue = 0.0f;
-    float avg_error_qnnue = 0.0f;
-    float avg_error_static_eval = 0.0f;
-    float avg_quantization_error = 0.0f;
-    float worst_quantization_error = 0.0f;
-
-    float avg_error_nnue_black = 0.0f;
-    float avg_error_nnue_white = 0.0f;
-
-    int black_positions = 0;
-    int white_positions = 0;
-
-    board_state state;
-
-    int positions = 0;
-
-    std::cout << "Comparing..." << std::endl;
-    for (size_t i = 0; i < test_set.size(); i++) {
-        state.load_fen(test_set[i].fen);
-
-        if (state.in_check(state.get_turn()) || state.get_square(test_set[i].bm.to).get_type() != EMPTY) {
-            continue;
-        }
-        positions++;
-
-        float real = test_set[i].eval / 100.0f;
-        float qeval = (float)quantized_nnue.evaluate(state) / 100.0f;
-        float eval = training_nnue.evaluate(state);
-
-        avg_error_nnue += (real - eval)*(real - eval);
-        avg_error_qnnue += (real - qeval)*(real - qeval);
-
-        if (state.get_turn() == WHITE) {
-            avg_error_nnue_white += (real - eval)*(real - eval);
-            white_positions += 1;
-        } else {
-            avg_error_nnue_black += (real - eval)*(real - eval);
-            black_positions += 1;
-        }
-
-        if (worst_quantization_error < std::abs(eval - qeval)) {
-            worst_quantization_error = std::abs(eval - qeval);
-        }
-
-        float abs_error = std::abs(eval - qeval);
-        if (abs_error > 0.1) {
-            std::cout << "error: " << abs_error << "  Eval " << eval << "  Qeval " << qeval << std::endl;
-        }
-
-
-        avg_quantization_error += (eval - qeval)*(eval - qeval);
-    }
-    avg_error_nnue = sqrt(avg_error_nnue / positions);
-    avg_error_qnnue = sqrt(avg_error_qnnue / positions);
-    avg_error_static_eval = sqrt(avg_error_static_eval / positions);
-    avg_quantization_error = sqrt(avg_quantization_error / positions);
-
-    avg_error_nnue_black = sqrt(avg_error_nnue_black / black_positions);
-    avg_error_nnue_white = sqrt(avg_error_nnue_white / white_positions);
-
-    std::cout << "NNUE: " << avg_error_nnue << "  Quantized NNUE: " << avg_error_qnnue << "   Static eval: " << avg_error_static_eval << std::endl;
-    std::cout << "Avg quantization error: " << avg_quantization_error << "   Worst quantization error: " << worst_quantization_error << std::endl;
-    std::cout << "White NNUE: " << avg_error_nnue_white << " Black NNUE: " << avg_error_nnue_black << std::endl;
-}
-
-
-
-void nnue_trainer::quantize_net(std::string net_file, std::string qnet_file)
-{
-    std::shared_ptr<training_weights> weights = std::make_shared<training_weights>();
-    weights->load_file(net_file);
-    weights->save_quantized(qnet_file);
-}
-
-
-
-
 void visualize_net(std::string output_folder, training_weights &weights)
 {
     int neurons_per_line = 32;
@@ -571,6 +493,121 @@ void visualize_net(std::string output_folder, training_weights &weights)
 
 
 
+void nnue_trainer::test_nets(std::string training_net_file, std::string quantized_net_file, std::vector<selfplay_result> &test_set)
+{
+    std::cout << "Testing networks." << std::endl;
+
+    std::cout << "Loading training nnue..." << std::endl;
+
+    std::shared_ptr<training_weights> training_nnue_weights = std::make_shared<training_weights>();
+    training_nnue_weights->load_file(training_net_file);
+    training_network training_nnue(training_nnue_weights);
+
+    visualize_net("vis", *training_nnue_weights);
+
+    //training_nnue_weights->perspective_weights.coalesce_factorizer_weights();
+
+    training_nnue_weights->save_quantized(quantized_net_file);
+
+    std::cout << "Loading quantized nnue..." << std::endl;
+
+    std::shared_ptr<nnue_weights> quantized_nnue_weights = std::make_shared<nnue_weights>();
+    quantized_nnue_weights->load(quantized_net_file);
+    nnue_network quantized_nnue(quantized_nnue_weights);
+
+    /*int perspective_activations[num_perspective_neurons];
+    for (int i = 0; i < num_perspective_neurons; i++) {
+        perspective_activations[i] = 0;
+    }*/
+
+    float avg_error_nnue = 0.0f;
+    float avg_error_qnnue = 0.0f;
+    float avg_quantization_error = 0.0f;
+    float worst_quantization_error = 0.0f;
+
+    float avg_error_nnue_black = 0.0f;
+    float avg_error_nnue_white = 0.0f;
+
+    int black_positions = 0;
+    int white_positions = 0;
+
+    board_state state;
+
+    int positions = 0;
+
+    std::cout << "Comparing..." << std::endl;
+    for (size_t i = 0; i < test_set.size(); i++) {
+        state.load_fen(test_set[i].fen);
+
+        if (state.in_check(state.get_turn()) || state.get_square(test_set[i].bm.to).get_type() != EMPTY) {
+            continue;
+        }
+        positions++;
+
+        float real = test_set[i].eval / 100.0f;
+        float qeval = (float)quantized_nnue.evaluate(state) / 100.0f;
+        float eval = training_nnue.evaluate(state);
+
+        avg_error_nnue += (real - eval)*(real - eval);
+        avg_error_qnnue += (real - qeval)*(real - qeval);
+
+        if (state.get_turn() == WHITE) {
+            avg_error_nnue_white += (real - eval)*(real - eval);
+            white_positions += 1;
+        } else {
+            avg_error_nnue_black += (real - eval)*(real - eval);
+            black_positions += 1;
+        }
+
+        worst_quantization_error = std::max(worst_quantization_error, std::abs(eval - qeval));
+
+        float abs_error = std::abs(eval - qeval);
+        if (abs_error > 0.5) {
+            //std::cout << "error: " << abs_error << "  Eval " << eval << "  Qeval " << qeval << " " << test_set[i].fen << std::endl;
+        }
+
+        avg_quantization_error += (eval - qeval)*(eval - qeval);
+
+
+        /*for (int i = 0; i < quantized_nnue.black_side.num_of_outputs; i++) {
+            perspective_activations[quantized_nnue.black_side.outputs_idx[i]] += 1;
+        }
+        for (int i = 0; i < quantized_nnue.white_side.num_of_outputs; i++) {
+            perspective_activations[quantized_nnue.white_side.outputs_idx[i]] += 1;
+        }*/
+    }
+    avg_error_nnue = sqrt(avg_error_nnue / positions);
+    avg_error_qnnue = sqrt(avg_error_qnnue / positions);
+    avg_quantization_error = sqrt(avg_quantization_error / positions);
+
+    avg_error_nnue_black = sqrt(avg_error_nnue_black / black_positions);
+    avg_error_nnue_white = sqrt(avg_error_nnue_white / white_positions);
+
+
+
+    /*std::cout << "Activations: " << std::endl;
+    for (int i = 0; i < num_perspective_neurons; i++) {
+        std::cout << i << ": " << perspective_activations[i] << " " << (double)perspective_activations[i]*50.0f / positions << "%" << std::endl;
+    }*/
+
+
+
+    std::cout << "NNUE: " << avg_error_nnue << "  Quantized NNUE: " << avg_error_qnnue << std::endl;
+    std::cout << "Avg quantization error: " << avg_quantization_error << "   Worst quantization error: " << worst_quantization_error << std::endl;
+    std::cout << "White NNUE: " << avg_error_nnue_white << " Black NNUE: " << avg_error_nnue_black << std::endl;
+}
+
+
+
+void nnue_trainer::quantize_net(std::string net_file, std::string qnet_file)
+{
+    std::shared_ptr<training_weights> weights = std::make_shared<training_weights>();
+    weights->load_file(net_file);
+    weights->save_quantized(qnet_file);
+}
+
+
+
 
 void training_loop(std::string net_file, std::string qnet_file, std::shared_ptr<training_weights> weights, std::shared_ptr<data_reader> dataset)
 
@@ -593,16 +630,16 @@ void training_loop(std::string net_file, std::string qnet_file, std::shared_ptr<
 
     worker_thread_pool thread_pool(16, weights, gradient, gradient_sq, first_moment, second_moment, corrected_first_moment, corrected_second_moment);
 
-    //weights->output_weights.broadcast_neuron_weights(0);
-
     bool use_factorized = true;
-    float learning_rate = 0.001f;
+    float learning_rate = 0.0002f;
     float beta1 = 0.9f;
-    float beta2 = 0.995f;
-    int batch_size = 1000*thread_pool.get_pool_size();
+    float beta2 = 0.999f;
+    int batch_size = 4000*thread_pool.get_pool_size();
     int epoch_size = 100000000;
     float min_lambda = 0.2f;
     float max_lambda = 0.5f;
+
+    float learning_rate_decay = 0.98f;
 
     training_batch_manager batch_manager(batch_size, epoch_size, dataset);
 
@@ -618,6 +655,7 @@ void training_loop(std::string net_file, std::string qnet_file, std::shared_ptr<
     std::cout << "Beta1: " << beta1 << std::endl;
     std::cout << "Beta2: " << beta2 << std::endl;
     std::cout << "Learning rate: " << learning_rate << std::endl;
+    std::cout << "Learning rate decay: " << learning_rate_decay << std::endl;
     std::cout << "Min lambda: " << min_lambda << std::endl;
     std::cout << "Max lambda: " << max_lambda << std::endl;
     std::cout << "Batch size: " << batch_size << std::endl;
@@ -640,6 +678,8 @@ void training_loop(std::string net_file, std::string qnet_file, std::shared_ptr<
             weights->save_quantized(qnet_file);
 
             visualize_net("vis", *weights);
+
+            learning_rate *= learning_rate_decay;
 
             std::cout << "Net saved!" << std::endl;
         }
@@ -676,6 +716,34 @@ void nnue_trainer::train(std::string net_file, std::string qnet_file, std::vecto
     visualize_net("vis", *weights);
 
     training_loop(net_file, qnet_file, weights, reader);
+}
+
+
+float nnue_trainer::find_scaling_factor_for_net(std::string qnet_file, std::vector<selfplay_result> &positions)
+{
+    std::shared_ptr<nnue_weights> weights = std::make_shared<nnue_weights>();
+    weights->load(qnet_file);
+    nnue_network net(weights);
+
+    std::vector<training_position> data;
+    data.reserve(positions.size());
+
+    std::cout << "Evaluating positions... ";
+
+    board_state state;
+
+    for (size_t i = 0; i < positions.size(); i++) {
+        state.load_fen(positions[i].fen);
+        data.emplace_back(positions[i]);
+        data.back().eval = net.evaluate(state);
+    }
+    std::cout << "done." << std::endl;
+
+    float scaling_factor = training_data_utility::find_scaling_factor_for_data(data);
+
+    std::cout << "Scaling factor: " << scaling_factor << std::endl;
+
+    return scaling_factor;
 }
 
 

@@ -35,12 +35,14 @@ struct scored_move_array
     scored_move_array() {
         num_of_moves = 0;
         moves_left = 0;
+        to_squares = 0;
     }
 
     void clear()
     {
         num_of_moves = 0;
         moves_left = 0;
+        to_squares = 0;
     }
 
     bool is_full() const {
@@ -48,6 +50,10 @@ struct scored_move_array
     }
 
     bool contains(const chess_move &mov) {
+        if ((to_squares & (1ull << mov.to.index)) == 0) {
+            return false;
+        }
+
         for (int i = 0; i < num_of_moves; i++) {
             if (mov == moves[i].mov) {
                 return true;
@@ -83,6 +89,7 @@ struct scored_move_array
     }
 
     void add(const chess_move &mov, const int32_t &score) {
+        to_squares |= 1ull << mov.to.index;
         moves[num_of_moves].mov = mov;
         moves[num_of_moves].score = score;
         num_of_moves++;
@@ -92,6 +99,8 @@ struct scored_move_array
     scored_move moves[N];
     int num_of_moves;
     int moves_left;
+
+    uint64_t to_squares;
 };
 
 
@@ -212,8 +221,6 @@ struct move_picker
     }
 
     void add_quiet_moves() {
-        constexpr int32_t good_quiet_treshold = 3000;
-
         chess_move moves[240];
         int num_of_moves = move_generator::generate_quiet_moves(*state, state->get_turn(), moves);
 
@@ -380,6 +387,9 @@ struct move_picker
     int legal_moves;
 
     int32_t previus_pick_score;
+
+
+    int32_t good_quiet_treshold;
 
 private:
     int stage;

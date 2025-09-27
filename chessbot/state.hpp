@@ -8,6 +8,7 @@
 #include "defs.hpp"
 #include "nnue/nnue.hpp"
 
+
 inline player_type_t next_turn(player_type_t player)
 {
     if (player == WHITE) {
@@ -56,6 +57,10 @@ struct square_index
 
     inline uint_fast8_t get_y() const {
         return index / BOARD_WIDTH;
+    }
+
+    bool is_dark() const {
+        return ((((int)index * 9) & 0x8) == 0);
     }
 
     bool valid() const {
@@ -225,15 +230,16 @@ struct chess_move
 };
 
 
-struct unmove_data
+struct unmake_restore
 {
-    piece from_restore;
-    piece to_restore;
-    uint16_t flags_restore;
-    uint16_t half_move_clock_restore;
-    square_index en_passant_square_restore;
-    square_index en_passant_target_square_restore;
-    uint64_t restore_zhash;
+    piece from;
+    piece to;
+    uint16_t flags;
+    uint16_t half_move_clock;
+    square_index en_passant_square;
+    square_index en_passant_target_square;
+    uint64_t zhash;
+    uint64_t structure_hash;
     bool en_passant_used;
 };
 
@@ -255,6 +261,12 @@ public:
 
 
     inline void set_square(const square_index &pos, const piece &new_piece) {
+
+        static const uint32_t mat_conf_add[16] = {
+        0, 1 << 0, 1 << 8,  1 << 14, 1 << 20, 1 << 26, 0, 0,
+        0, 1 << 4, 1 << 11, 1 << 17, 1 << 23, 1 << 29, 0, 0,
+        };
+
         piece old_piece = board[pos.index];
 
         bool old_color = (old_piece.get_player() == BLACK);
@@ -267,14 +279,16 @@ public:
 
         if (old_piece.get_type() != EMPTY) {
             pieces_by_color[old_color] &= ~bb;
+            material_conf -= mat_conf_add[old_piece.d];
             if ((flags & INCREMENT_NNUE) != 0) {
-                nnue->unset_piece(old_piece, pos.index, white_king_square, black_king_square);
+                nnue->unset_piece(old_piece, pos.index);
             }
         }
         if (new_piece.get_type() != EMPTY) {
             pieces_by_color[new_color] |= bb;
+            material_conf += mat_conf_add[new_piece.d];
             if ((flags & INCREMENT_NNUE) != 0) {
-                nnue->set_piece(new_piece, pos.index, white_king_square, black_king_square);
+                nnue->set_piece(new_piece, pos.index);
             }
         }
 
@@ -290,19 +304,20 @@ public:
     bool causes_check(chess_move &mov, player_type_t player) const {
         bool color = (player == BLACK);
 
-        bitboard occupation = pieces_by_color[!color] | pieces_by_color[color];
+        bitboard occupation = pieces_by_color[0] | pieces_by_color[1];
 
-        square_index king_sq = white_king_square;
+        int king_sq = white_king_square.index;
         if (player == BLACK) {
-            king_sq = black_king_square;
+            king_sq = black_king_square.index;
         }
         if (mov.from == king_sq) {
-            king_sq = mov.to;
+            king_sq = mov.to.index;
         }
 
-        bitboard pieces[8];
-        for (int i = 0; i < 8; i++) {
-            pieces[i] = bitboards[i][!color];
+        bitboard pieces[8][2];
+        for (int i = PAWN; i <= KING; i++) {
+            pieces[i][0] = bitboards[i][0];
+            pieces[i][1] = bitboards[i][1];
         }
 
         bitboard from_bb = ((uint64_t)0x1 << mov.from.index);
@@ -310,123 +325,81 @@ public:
 
         occupation &= ~from_bb;
 
-        if (get_square(mov.from).get_player() != player) {
-            pieces[get_square(mov.from).get_type()] &= ~from_bb;
-            if (mov.promotion != 0) {
-                pieces[mov.promotion] |= to_bb;
-            } else {
-                pieces[get_square(mov.from).get_type()] |= to_bb;
-            }
-        } else {
-            if (get_square(mov.to).get_type() != EMPTY) {
-                pieces[get_square(mov.to).get_type()] &= ~to_bb;
-            }
-        }
+        piece moving = get_square(mov.from);
+        piece captured = get_square(mov.to);
 
-        if (mov.to == en_passant_square && get_square(mov.from).get_type() == PAWN && (flags & EN_PASSANT_AVAILABLE) != 0) {
+        bool moving_color = (moving.get_player() == BLACK);
+
+        pieces[captured.get_type()][!moving_color] &= ~to_bb;
+        pieces[moving.get_type()][moving_color] &= ~from_bb;
+        pieces[(mov.promotion == 0 ? moving.get_type() : mov.promotion)][moving_color] |= to_bb;
+
+        if (mov.to == en_passant_square && moving.get_type() == PAWN && (flags & EN_PASSANT_AVAILABLE) != 0) {
             occupation &= ~((uint64_t)0x1 << en_passant_target_square.index);
-            if (get_square(mov.from).get_player() == player) {
-                pieces[PAWN] &= ~((uint64_t)0x1 << en_passant_target_square.index);
-            }
+            pieces[PAWN][!moving_color] &= ~((uint64_t)0x1 << en_passant_target_square.index);
         }
 
-        if (get_square(mov.from).get_type() == KING) {
+        if (moving.get_type() == KING) {
             if (mov.to.get_x() == 2 && mov.from.get_x() == 4) {
                 square_index old_rook_sq = square_index(0, mov.from.get_y());
                 square_index new_rook_sq = square_index(3, mov.from.get_y());
                 occupation &= ~((uint64_t)0x1 << old_rook_sq.index);
                 occupation |=  ((uint64_t)0x1 << new_rook_sq.index);
 
-                if (get_square(mov.from).get_player() != player) {
-                    pieces[ROOK] &= ~((uint64_t)0x1 << old_rook_sq.index);
-                    pieces[ROOK] |=  ((uint64_t)0x1 << new_rook_sq.index);
-                }
+                pieces[ROOK][moving_color] &= ~((uint64_t)0x1 << old_rook_sq.index);
+                pieces[ROOK][moving_color] |=  ((uint64_t)0x1 << new_rook_sq.index);
             } else if (mov.to.get_x() == 6 && mov.from.get_x() == 4) {
                 square_index old_rook_sq = square_index(7, mov.from.get_y());
                 square_index new_rook_sq = square_index(5, mov.from.get_y());
                 occupation &= ~((uint64_t)0x1 << old_rook_sq.index);
                 occupation |=  ((uint64_t)0x1 << new_rook_sq.index);
 
-                if (get_square(mov.from).get_player() != player) {
-                    pieces[ROOK] &= ~((uint64_t)0x1 << old_rook_sq.index);
-                    pieces[ROOK] |=  ((uint64_t)0x1 << new_rook_sq.index);
-                }
+                pieces[ROOK][moving_color] &= ~((uint64_t)0x1 << old_rook_sq.index);
+                pieces[ROOK][moving_color] |=  ((uint64_t)0x1 << new_rook_sq.index);
             }
         }
 
         occupation |= to_bb;
 
-        bitboard enemy_pieces = pieces[PAWN] | pieces[KNIGHT] | pieces[BISHOP] | pieces[ROOK] | pieces[QUEEN] | pieces[KING];
+        bitboard mask = ~(0ull);
 
+        bitboard attacks[7] = {0, bitboard_utils.pawn_attack(king_sq, occupation, color, mask, 0),
+                                  bitboard_utils.knight_attack(king_sq, mask),
+                                  bitboard_utils.bishop_attack(king_sq, occupation, mask),
+                                  bitboard_utils.rook_attack(king_sq, occupation, mask),
+                                  bitboard_utils.queen_attack(king_sq, occupation, mask),
+                                  bitboard_utils.king_attack(king_sq, mask)};
 
-        bitboard bishop_style = bitboard_utils.bishop_attack(king_sq.index, occupation, ~(uint64_t)0);
-        bitboard rook_style = bitboard_utils.rook_attack(king_sq.index, occupation, ~(uint64_t)0);
-        bitboard knight_style = bitboard_utils.knight_attack(king_sq.index, ~(uint64_t)0);
-
-        if (((bishop_style | rook_style | knight_style) & enemy_pieces) == 0) {
-            return false;
+        for (int i = PAWN; i <= KING; i++) {
+            if ((attacks[i] & pieces[i][!color]) != 0) {
+                return true;
+            }
         }
 
-        if (((rook_style & pieces[ROOK]) != 0) ||
-            ((rook_style & pieces[QUEEN]) != 0)) {
-            return true;
-        }
-
-        if (((bishop_style & pieces[BISHOP]) != 0) ||
-            ((bishop_style & pieces[QUEEN]) != 0)) {
-            return true;
-        }
-
-        if ((knight_style & pieces[KNIGHT]) != 0) {
-            return true;
-        }
-
-        if (bitboard_utils.king_attack(king_sq.index, pieces[KING]) != 0) {
-            return true;
-        }
-        if (bitboard_utils.pawn_attack(king_sq.index, occupation, color, pieces[PAWN], 0) != 0) {
-            return true;
-        }
         return false;
     }
 
 
     bool is_square_threatened(square_index pos, player_type_t player) const {
-
         bool color = (player == BLACK);
 
-        bitboard enemy_pieces = pieces_by_color[!color];
+        bitboard mask = ~(0ull);
 
-        bitboard occupation = pieces_by_color[!color] | pieces_by_color[color];
+        bitboard occupation = pieces_by_color[0] | pieces_by_color[1];
 
-        bitboard bishop_style = bitboard_utils.bishop_attack(pos.index, occupation, ~(uint64_t)0);
-        bitboard rook_style = bitboard_utils.rook_attack(pos.index, occupation, ~(uint64_t)0);
-        bitboard knight_style = bitboard_utils.knight_attack(pos.index, ~(uint64_t)0);
+        bitboard attacks[7] = {0, bitboard_utils.pawn_attack(pos.index, occupation, color, mask, 0),
+                                  bitboard_utils.knight_attack(pos.index, mask),
+                                  bitboard_utils.bishop_attack(pos.index, occupation, mask),
+                                  bitboard_utils.rook_attack(pos.index, occupation, mask),
+                                  bitboard_utils.queen_attack(pos.index, occupation, mask),
+                                  bitboard_utils.king_attack(pos.index, mask)};
 
-        if (((bishop_style | rook_style | knight_style) & enemy_pieces) == 0) {
-            return false;
+        for (int i = PAWN; i <= KING; i++) {
+            if ((attacks[i] & bitboards[i][!color]) != 0) {
+                return true;
+            }
         }
 
-        if (((rook_style & bitboards[ROOK][!color]) != 0) ||
-            ((rook_style & bitboards[QUEEN][!color]) != 0)) {
-            return true;
-        }
-
-        if (((bishop_style & bitboards[BISHOP][!color]) != 0) ||
-            ((bishop_style & bitboards[QUEEN][!color]) != 0)) {
-            return true;
-        }
-
-        if ((knight_style & bitboards[KNIGHT][!color]) != 0) {
-            return true;
-        }
-
-        if (bitboard_utils.king_attack(pos.index, bitboards[KING][!color]) != 0) {
-            return true;
-        }
-        if (bitboard_utils.pawn_attack(pos.index, occupation, color, bitboards[PAWN][!color], 0) != 0) {
-            return true;
-        }
         return false;
     }
 
@@ -504,6 +477,27 @@ public:
         return false;
     }
 
+    piece_type_t least_valuable_threatener(square_index pos, player_type_t player) const {
+        bitboard mask = ~(1ull << pos.index);
+        bitboard occupation = pieces_by_color[0] | pieces_by_color[1];
+
+        bool color = (player == BLACK);
+
+        bitboard attacks[7] = {0, bitboard_utils.pawn_attack(pos.index, occupation, color, mask, 0),
+                                  bitboard_utils.knight_attack(pos.index, mask),
+                                  bitboard_utils.bishop_attack(pos.index, occupation, mask),
+                                  bitboard_utils.rook_attack(pos.index, occupation, mask),
+                                  bitboard_utils.queen_attack(pos.index, occupation, mask),
+                                  bitboard_utils.king_attack(pos.index, mask)};
+
+        for (int i = PAWN; i <= KING; i++) {
+            if ((attacks[i] & bitboards[i][!color]) != 0) {
+                return (piece_type_t)i;
+            }
+        }
+        return EMPTY;
+    }
+
     bool in_check(player_type_t player) const {
         if (player == WHITE) {
             return is_square_threatened(white_king_square, WHITE);
@@ -525,10 +519,6 @@ public:
         return count_non_pawn_pieces(BLACK) + count_non_pawn_pieces(WHITE);
     }
 
-    bitboard get_non_pawn_pieces_bb() const {
-        return (pieces_by_color[0] | pieces_by_color[1]) & ~(bitboards[PAWN][0] | bitboards[PAWN][1] | bitboards[KING][0] | bitboards[KING][1]);
-    }
-
     bool is_insufficient_material() const {
         int num_of_pieces = pop_count(pieces_by_color[0] | pieces_by_color[1]);
 
@@ -544,7 +534,10 @@ public:
             if (pop_count(bitboards[BISHOP][0]) == 1 &&
                 pop_count(bitboards[BISHOP][1]) == 1) {
 
-                if ((bit_scan_forward(bitboards[BISHOP][0]) & 0x1) == (bit_scan_forward(bitboards[BISHOP][1]) & 0x1)) {
+                square_index sq0 = square_index(bit_scan_forward(bitboards[BISHOP][0]));
+                square_index sq1 = square_index(bit_scan_forward(bitboards[BISHOP][1]));
+
+                if (sq0.is_dark() == sq1.is_dark()) {
                     return true;
                 }
             }
@@ -552,12 +545,14 @@ public:
         return false;
     }
 
-    unmove_data make_null_move();
-    void unmake_null_move(unmove_data restore);
-    unmove_data make_move(chess_move m, uint64_t next_zhash);
-    unmove_data make_move(chess_move m);
 
-    void unmake_move(chess_move m, unmove_data restore);
+
+    unmake_restore make_null_move();
+    void unmake_null_move(const unmake_restore &restore);
+    unmake_restore make_move(chess_move m, uint64_t next_zhash);
+    unmake_restore make_move(chess_move m);
+
+    void unmake_move(chess_move m, const unmake_restore &restore);
 
     inline player_type_t get_turn() const {
         if ((half_move_clock & 0x1) == 0) {
@@ -613,34 +608,18 @@ public:
         return check_repetition(zhash);
     }
 
+    uint32_t minor_hash() const {
+        return ((structure_hash & MINOR_STRUCTURE_HASH_MASK) >> MINOR_STRUCTURE_HASH_SHIFT);
+    }
+    uint32_t major_hash() const {
+        return ((structure_hash & MAJOR_STRUCTURE_HASH_MASK) >> MAJOR_STRUCTURE_HASH_SHIFT);
+    }
     uint32_t pawn_hash() const {
-        uint64_t h = bitboards[PAWN][0] | bitboards[PAWN][1];
-
-        h ^= h >> 33;
-        h *= 0xff51afd7ed558ccdL;
-        h ^= h >> 33;
-        h *= 0xc4ceb9fe1a85ec53L;
-        h ^= h >> 33;
-
-        return h & 0xFFFFFFFF;
+        return ((structure_hash & PAWN_STRUCTURE_HASH_MASK) >> PAWN_STRUCTURE_HASH_SHIFT);
     }
 
     uint32_t material_hash() const {
-        uint32_t h = 0;
-        h |= pop_count(bitboards[PAWN][0]) << 0;
-        h |= pop_count(bitboards[PAWN][1]) << 4;
-
-        h |= pop_count(bitboards[KNIGHT][0]) << 8;
-        h |= pop_count(bitboards[KNIGHT][1]) << 11;
-
-        h |= pop_count(bitboards[BISHOP][0]) << 14;
-        h |= pop_count(bitboards[BISHOP][1]) << 17;
-
-        h |= pop_count(bitboards[ROOK][0]) << 20;
-        h |= pop_count(bitboards[ROOK][1]) << 23;
-
-        h |= pop_count(bitboards[QUEEN][0]) << 26;
-        h |= pop_count(bitboards[QUEEN][1]) << 29;
+        uint32_t h = material_conf;
 
         h ^= h >> 16;
         h *= 0x85ebca6b;
@@ -652,13 +631,16 @@ public:
     }
 
     uint64_t zhash;
+    uint64_t structure_hash;
 
     void recalculate_bitboards();
+    void recalculate_piece_counter();
     bool validate_bitboards() const;
 
 
     bitboard bitboards[8][2];
     bitboard pieces_by_color[2];
+
 
     void load_fen(std::string fen_str);
     std::string generate_fen() const;
@@ -671,6 +653,7 @@ public:
     square_index en_passant_square;
     square_index en_passant_target_square;
     uint16_t half_move_clock;
+    uint32_t material_conf;
 
 private:
     void push_hash_stack(uint64_t zhash, bool irreversible)

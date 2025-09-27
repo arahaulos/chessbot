@@ -54,7 +54,7 @@ private:
 
     board_state state;
 
-    std::vector<unmove_data> unmoves;
+    std::vector<unmake_restore> unmoves;
     game_error_type_t error;
 
 };

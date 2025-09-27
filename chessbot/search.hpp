@@ -35,6 +35,8 @@ struct search_params
         lmr_modifier = 17;
 
         razoring_margin = 200;
+
+        good_quiet_treshold = -1000;
     }
 
 
@@ -54,12 +56,14 @@ struct search_params
             int lmr_modifier;
 
             int razoring_margin;
+
+            int good_quiet_treshold;
         };
-        int data[10];
+        int data[11];
     };
 
     static int get_variable_index(std::string name) {
-        for (int i = 0; i < 10; i++) {
+        for (int i = 0; i < 11; i++) {
             if (name == get_variable_name(i)) {
                 return i;
             }
@@ -69,7 +73,7 @@ struct search_params
 
     static std::string get_variable_name(int index)
     {
-        const char *str[10] = {
+        const char *str[11] = {
             "rfmargin_base",
             "rfmargin_mult",
             "rfmargin_improving_modifier",
@@ -79,17 +83,18 @@ struct search_params
             "lmr_hist_adjust",
             "see_margin_mult",
             "lmr_modifier",
-            "razoring_margin"
+            "razoring_margin",
+            "good_quiet_treshold"
         };
 
-        if (index >= 0 && index < 10) {
+        if (index >= 0 && index < 11) {
             return std::string(str[index]);
         }
         return std::string("check that fucking index");
     }
 
     static void get_limits(int index, int &minv, int &maxv) {
-        int limits[20] = {
+        int limits[22] = {
             0, 100,
             40, 140,
             20, 100,
@@ -99,10 +104,11 @@ struct search_params
             4000, 10000,
             80, 200,
             10, 30,
-            150, 300
+            150, 300,
+            -3000, 3000
         };
 
-        if (index >= 0 && index < 10) {
+        if (index >= 0 && index < 11) {
             minv = limits[index*2 + 0];
             maxv = limits[index*2 + 1];
         }
@@ -127,38 +133,66 @@ struct search_statistics
         nodes += other.nodes;
         cache_hits += other.cache_hits;
         cache_misses += other.cache_misses;
+
         fail_high_index += other.fail_high_index;
         fail_highs += other.fail_highs;
+
         eval_cache_hits += other.eval_cache_hits;
         eval_cache_misses += other.eval_cache_misses;
 
-        static_eval_error += other.static_eval_error;
-        static_eval_error_samples += other.static_eval_error_samples;
-        corrected_eval_error += other.corrected_eval_error;
+        history_score_samples += other.history_score_samples;
 
-        eval_diff += other.eval_diff;
-        eval_diff_samples += other.eval_diff_samples;
-
-        avg_se_diff += other.avg_se_diff;
-        se_diff_samples += other.se_diff_samples;
-
-        avg_tempo += other.avg_tempo;
-        tempo_samples += other.tempo_samples;
+        for (int i = 0; i < 32; i++) {
+            history_buckets[i] += other.history_buckets[i];
+        }
 
         max_distance_to_root = std::max(max_distance_to_root, other.max_distance_to_root);
     }
 
+    void add_history_sample(int64_t score)
+    {
+        int min_hist = -16000;
+        int max_hist = 16000;
+
+        int step = (max_hist - min_hist)/32;
+
+        int treshold = min_hist + step;
+        for (int i = 0; i < 32; i++) {
+            if (score < treshold) {
+                history_buckets[i] += 1;
+                return;
+            }
+            treshold = treshold + step;
+        }
+        history_buckets[31] += 1;
+    }
+
+    void print_history_distribution()
+    {
+        int min_hist = -16000;
+        int max_hist = 16000;
+
+        int step = (max_hist - min_hist)/32;
+
+        std::cout << step << std::endl;
+
+        int treshold = min_hist + step;
+
+        int64_t total_samples = 0;
+        for (int i = 0; i < 32; i++) {
+            total_samples += history_buckets[i];
+        }
+
+        for (int i = 0; i < 32; i++) {
+            std::cout << " < " << treshold << ": " << (double)history_buckets[i]*100 / total_samples << "%" << std::endl;
+            treshold = treshold + step;
+        }
+    }
+
+
     int64_t nodes;
     int64_t cache_hits;
     int64_t cache_misses;
-
-    int64_t static_eval_error;
-    int64_t static_eval_error_samples;
-
-    int64_t eval_diff;
-    int64_t eval_diff_samples;
-
-    int64_t corrected_eval_error;
 
     int64_t eval_cache_hits;
     int64_t eval_cache_misses;
@@ -166,13 +200,10 @@ struct search_statistics
     int64_t fail_high_index;
     int64_t fail_highs;
 
+    int64_t history_score_samples;
+    int64_t history_buckets[32];
+
     int max_distance_to_root;
-
-    int64_t avg_se_diff;
-    int64_t se_diff_samples;
-
-    int64_t avg_tempo;
-    int64_t tempo_samples;
 };
 
 struct pv_table
@@ -234,7 +265,6 @@ struct search_context
             moves[i] = chess_move::null_move();
             static_eval[i] = 0;
         }
-
         history.conthist_stack = conthist;
         history.move_stack = moves;
 
@@ -258,6 +288,7 @@ struct search_context
         } else {
             state.nnue = nullptr;
         }
+
         history.conthist_stack = conthist;
         history.move_stack = moves;
     }
@@ -267,9 +298,10 @@ struct search_context
     board_state state;
     search_statistics stats;
 
+    piece_square_history *conthist[MAX_DEPTH];
+
     int min_nmp_ply;
 
-    piece_square_history *conthist[MAX_DEPTH];
     chess_move moves[MAX_DEPTH];
     int reduction[MAX_DEPTH];
     int32_t static_eval[MAX_DEPTH];
@@ -332,33 +364,43 @@ public:
     int32_t get_transpostion_table_usage_permill();
 
     uint64_t get_node_count() {
+        int n = 0;
         info_lock.lock();
-        int n = search_infos.back().nodes;
+        if (search_infos.size() > 0) {
+            n = search_infos.back().nodes;
+        }
         info_lock.unlock();
         return n;
     }
 
     int get_max_depth_reached() {
+        int sd = 0;
         info_lock.lock();
-        int sd = search_infos.back().seldepth;
+        if (search_infos.size() > 0) {
+            sd = search_infos.back().seldepth;
+        }
         info_lock.unlock();
         return sd;
     }
 
     chess_move get_move(int pv_num)
     {
-        chess_move p;
+        chess_move p = chess_move::null_move();
         info_lock.lock();
-        p = search_infos.back().lines[pv_num]->moves[0];
+        if (search_infos.size() > 0) {
+            p = search_infos.back().lines[pv_num]->moves[0];
+        }
         info_lock.unlock();
         return p;
     }
 
     int32_t get_evaluation(int pv_num)
     {
-        int32_t e;
+        int32_t e = 0;
         info_lock.lock();
-        e = search_infos.back().lines[pv_num]->score;
+        if (search_infos.size() > 0) {
+            e = search_infos.back().lines[pv_num]->score;
+        }
         info_lock.unlock();
         return e;
     }
@@ -366,14 +408,19 @@ public:
     void get_pv(pv_table &pv_out, int pv_num)
     {
         info_lock.lock();
-        pv_out = *search_infos.back().lines[pv_num];
+        if (search_infos.size() > 0) {
+            pv_out = *search_infos.back().lines[pv_num];
+        }
         info_lock.unlock();
     }
 
     int32_t get_depth()
     {
         info_lock.lock();
-        int depth = search_infos.back().depth;
+        int depth = 0;
+        if (search_infos.size() > 0) {
+            depth = search_infos.back().depth;
+        }
         info_lock.unlock();
         return depth;
     }
@@ -451,7 +498,7 @@ private:
     std::chrono::high_resolution_clock::time_point search_begin_time;
 
     cache<tt_bucket, TT_SIZE> transposition_table;
-    cache<eval_table_entry, EVAL_CACHE_SIZE> eval_cache;
+    cache<eval_cache_bucket, EVAL_CACHE_SIZE> eval_cache;
 
     opening_book book;
     board_state state_to_search;

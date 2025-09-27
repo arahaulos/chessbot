@@ -16,11 +16,14 @@ public:
 
     void run();
     void run_tests();
+    void run_benchmark();
 
     void selfplay(std::string folder, std::string nnue_file, int threads, int depth, int nodes, bool random, int games_per_file, int max_files);
 private:
     int perft_test(std::string position_fen, std::vector<int> expected_results);
     int test_incremental_updates();
+
+    uint64_t bench_position(std::string position_fen, int depth);
 
     std::shared_ptr<game_state> game;
     std::shared_ptr<alphabeta_search> alphabeta;

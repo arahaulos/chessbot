@@ -27,6 +27,9 @@ struct training_perspective_weights
     }
 
     void save_quantized(int16_t *data, size_t &index) {
+
+        float clamp_val = 32000.0f / halfkp_quantization_fractions;
+
         for (size_t j = 0; j < num_perspective_inputs; j++) {
             for (size_t i = 0; i < NEURONS; i++) {
                 float w = weights[j*NEURONS + i];
@@ -35,41 +38,19 @@ struct training_perspective_weights
 
                 float fw = weights[fi*NEURONS + i];
 
-                float val = std::clamp(w+fw, halfkp_quantization_clamp_min, halfkp_quantization_clamp_max);
+                float val = std::clamp(w+fw, -clamp_val, clamp_val);
                 int16_t qval = round(val*halfkp_quantization_fractions);
                 data[index++] = qval;
             }
         }
         for (int i = 0; i < NEURONS; i++) {
-            float val = std::clamp(biases[i], halfkp_quantization_clamp_min, halfkp_quantization_clamp_max);
+            float val = std::clamp(biases[i], -clamp_val, clamp_val);
             int16_t qval = round(val*halfkp_quantization_fractions);
             data[index++] = qval;
         }
     }
 
     void load(std::istream &stream) {
-        /*float *fw = new float[512*INPUTS];
-        stream.read((char*)fw, 512*INPUTS*sizeof(float));
-
-        for (int i = 0; i < INPUTS; i++) {
-            for (int j = 0; j < 512; j++) {
-                weights[i*NEURONS + j] = fw[i*512 + j];
-            }
-            for (int j = 512; j < NEURONS; j++) {
-                //weights[i*NEURONS + j] = 0;
-            }
-        }
-
-        for (int i = 0; i < NEURONS; i++) {
-            if (i < 512) {
-                stream.read((char*)&biases[i], sizeof(float));
-            } else {
-                //biases[i] = 0;
-            }
-        }
-
-        delete [] fw;*/
-
         stream.read((char*)weights, (NEURONS*INPUTS)*sizeof(float));
         stream.read((char*)biases, NEURONS*sizeof(float));
     }
@@ -129,7 +110,8 @@ struct training_perspective_weights
 
         __m256 lr = _mm256_set1_ps(learning_rate);
 
-        __m256 epsilon = _mm256_set1_ps(0.0000001f);
+        //__m256 epsilon = _mm256_set1_ps(0.0000001f);
+        float epsilon = 0.0000001f;
 
         int per_thread = INPUTS*NEURONS / tc;
         int start = per_thread*tid;
@@ -140,7 +122,7 @@ struct training_perspective_weights
 
             __m256 v = _mm256_load_ps(&pg->weights[i]);
 
-            __m256 mul = _mm256_mul_ps(lr, _mm256_rsqrt_ps(_mm256_add_ps(v, epsilon)));
+            __m256 mul = _mm256_mul_ps(lr, inv_sqrt_plus_eps(v, epsilon));
 
             __m256 nw = _mm256_fnmadd_ps(g, mul, w);
 
@@ -158,7 +140,7 @@ struct training_perspective_weights
 
                 __m256 v = _mm256_load_ps(&pg->biases[i]);
 
-                __m256 mul = _mm256_mul_ps(lr, _mm256_rsqrt_ps(_mm256_add_ps(v, epsilon)));
+                __m256 mul = _mm256_mul_ps(lr, inv_sqrt_plus_eps(v, epsilon));
 
                 __m256 nb = _mm256_fnmadd_ps(g, mul, b);
 
@@ -239,10 +221,6 @@ struct training_perspective
     }
 
     void set_input(int index) {
-        /*for (int i = 0; i < NEURONS; i++) {
-            acculumator[i] += weights->weights[i*INPUTS + index];
-        }*/
-
         float *w = &weights->weights[index*NEURONS];
 
         for (int i = 0; i < NEURONS; i += 8) {
@@ -269,10 +247,6 @@ struct training_perspective
 
 
     void update() {
-        /*for (int i = 0; i < NEURONS; i++) {
-            neurons[i] = activation_func(acculumator[i]);
-        }*/
-
         __m256 cmin = _mm256_set1_ps(0.0f);
         __m256 cmax = _mm256_set1_ps(1.0f);
 
@@ -326,46 +300,6 @@ struct training_perspective
             _mm256_store_ps(&gradients->biases[i], _mm256_add_ps(g0, g1));
 
         }
-
-        /*for (int i = 0; i < num_of_active_inputs; i++) {
-            int input = active_inputs[i];
-
-            for (int j = 0; j < NEURONS; j += 8) {
-                __m256 x = _mm256_load_ps(&acculumator[j]);
-                __m256 dc = _mm256_load_ps(&grads[j]);
-                __m256 g = _mm256_load_ps(&gradients->weights[input*NEURONS + j]);
-
-
-                __m256 cmp_ge = _mm256_cmp_ps(x, zero, _CMP_GE_OS); // x >= 0.0f
-                __m256 cmp_le = _mm256_cmp_ps(x, one, _CMP_LE_OS);  // x <= 1.0f
-                __m256 mask = _mm256_and_ps(cmp_ge, cmp_le);    // Combine comparisons
-
-                 __m256 da = _mm256_blendv_ps(zero, one, mask);
-
-
-                 g = _mm256_fmadd_ps(da, dc, g);
-
-                _mm256_store_ps(&gradients->weights[input*NEURONS + j], g);
-
-            }
-        }
-
-        for (int i = 0; i < NEURONS; i += 8) {
-            __m256 x = _mm256_load_ps(&acculumator[i]);
-            __m256 dc = _mm256_load_ps(&grads[i]);
-            __m256 g = _mm256_load_ps(&gradients->biases[i]);
-
-            __m256 cmp_ge = _mm256_cmp_ps(x, zero, _CMP_GE_OS); // x >= 0.0f
-            __m256 cmp_le = _mm256_cmp_ps(x, one, _CMP_LE_OS);  // x <= 1.0f
-            __m256 mask = _mm256_and_ps(cmp_ge, cmp_le);    // Combine comparisons
-
-            __m256 da = _mm256_blendv_ps(zero, one, mask);
-
-
-            g = _mm256_fmadd_ps(da, dc, g);
-            _mm256_store_ps(&gradients->biases[i], g);
-
-        }*/
     }
 
     float *neurons;

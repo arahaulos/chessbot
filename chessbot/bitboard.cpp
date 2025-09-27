@@ -397,6 +397,8 @@ void bitboard_utility::init_board_area_masks()
 
 
 bitboard_utility::bitboard_utility() {
+    std::cout << "Initializing bitboard lookup tables... ";
+
     generate_sliding_tables();
 
     init_pawn_tables(false);
@@ -408,6 +410,8 @@ bitboard_utility::bitboard_utility() {
     init_file_rank_lookups();
     init_passed_pawn_lookups();
     init_board_area_masks();
+
+    std::cout << "done." << std::endl;
 }
 
 void print_bitboard(bitboard bb)

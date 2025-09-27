@@ -1,8 +1,5 @@
 #pragma once
 
-#define TT_SLOT_DEPTH_PREFERRED 0
-#define TT_SLOT_ALWAYS_REPLACE 1
-
 #include "state.hpp"
 #include "movegen.hpp"
 
@@ -10,6 +7,9 @@
 constexpr int32_t TT_MAX_EVAL = std::numeric_limits<int16_t>::max() - 512;
 constexpr int32_t TT_MIN_EVAL = -TT_MAX_EVAL;
 
+constexpr int EVAL_CACHE_ENTRIES_PER_BUCKET = 4;
+constexpr int EVAL_CACHE_COUNTER_DIV = 4;
+constexpr int TT_ENTRIES_IN_BUCKET = 4;
 
 inline int32_t score_to_tt(int32_t score, int ply)
 {
@@ -45,38 +45,55 @@ inline int32_t score_from_tt(int32_t tt_score, int ply)
 }
 
 
-struct eval_table_entry
+struct eval_cache_bucket
 {
-    eval_table_entry() {};
+    eval_cache_bucket() { clear(); };
 
     void clear()
     {
-        data = 0;
-    }
-
-
-    uint64_t data;
-    bool read(const uint64_t &zhash, int32_t &score_out) const  {
-        uint64_t data_to_read = data;
-
-        if ((data_to_read & 0xFFFFFFFFFFFF0000) == (zhash & 0xFFFFFFFFFFFF0000)) {
-            int16_t score16 = (data_to_read & 0xFFFF);
-
-            score_out = score16;
-
-            return true;
-        } else {
-            return false;
+        for (int i = 0; i < EVAL_CACHE_ENTRIES_PER_BUCKET; i++) {
+            entries[i] = 0;
         }
     }
 
-    void write(const uint64_t &zhash, int32_t score_to_write) {
-        int16_t score16 = score_to_write;
-        uint64_t new_data = (zhash & 0xFFFFFFFFFFFF0000) | score16;
+    void bring_front(int index, const uint64_t &new_entry)
+    {
+        for (int i = index; i >= 1; i--) {
+            entries[i] = entries[i-1];
+        }
+        entries[0] = new_entry;
+    }
 
-        data = new_data;
+    uint64_t entries[EVAL_CACHE_ENTRIES_PER_BUCKET];
+
+    bool probe(const uint64_t &zhash, int32_t &score_out) {
+        for (int i = 0; i < EVAL_CACHE_ENTRIES_PER_BUCKET; i++) {
+            uint64_t entry = entries[i];
+            int16_t score16 = entry & 0xFFFF;
+            if ((entry & 0xFFFFFFFFFFFF0000ull) == (zhash & 0xFFFFFFFFFFFF0000ull)) {
+                score_out = score16;
+
+                bring_front(i, entry);
+
+                return true;
+            }
+        }
+        return false;
+    }
+
+    void store(const uint64_t &zhash, int32_t score_to_write) {
+        uint64_t new_entry = (zhash & 0xFFFFFFFFFFFF0000ull) | (score_to_write & 0xFFFF);
+
+        for (int i = 0; i < EVAL_CACHE_ENTRIES_PER_BUCKET; i++) {
+            if ((entries[i] & 0xFFFFFFFFFFFF0000ull) == (zhash & 0xFFFFFFFFFFFF0000ull)) {
+                bring_front(i, new_entry);
+                return;
+            }
+        }
+        bring_front(EVAL_CACHE_ENTRIES_PER_BUCKET - 1, new_entry);
     }
 };
+
 
 
 struct tt_entry
@@ -172,7 +189,7 @@ struct tt_bucket
     int used(int current_cache_age) {
         int used = 0;
         for (int i = 0; i < TT_ENTRIES_IN_BUCKET; i++) {
-            if (((entries[i].age_depth >> 7) + 2) > current_cache_age && entries[TT_SLOT_DEPTH_PREFERRED].static_eval_type != 0x7FFF) {
+            if (((entries[i].age_depth >> 7) + 2) > current_cache_age && entries[i].static_eval_type != 0x7FFF) {
                 used++;
             }
         }
