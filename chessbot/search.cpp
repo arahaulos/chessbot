@@ -724,6 +724,63 @@ int32_t alphabeta_search::alphabeta(board_state &state, int32_t alpha, int32_t b
         depth -= 1;
     }
 
+    //Probcut
+    //If there is good capture, capture is searched at reduced depth with higher beta.
+    //If reduced search returns score above raised beta, we can safely prune this subtree
+    int probcut_beta = beta + sp.probcut_margin;
+    int probcut_depth = depth - 5;
+    if (!is_pv &&
+        !in_check &&
+        skip_move == nullptr &&
+        probcut_depth > 0 &&
+        (!tt_hit || tt_score >= probcut_beta)) {
+
+        scored_move_array<80> scored_captures;
+        chess_move captures[80];
+        int num_of_captures = move_generator::generate_capture_moves(state, state.get_turn(), captures);
+
+        for (int i = 0; i < num_of_captures; i++) {
+            int see = static_exchange_evaluation(state, captures[i]);
+            if (static_eval + see >= probcut_beta && see > 0) {
+                scored_captures.add(captures[i], (captures[i] == tt_move ? 32000 : see));
+            }
+        }
+
+        chess_move cap;
+        while (scored_captures.pick(cap)) {
+            if (state.causes_check(cap, state.get_turn())) {
+                continue;
+            }
+            uint64_t next_hash = hashgen.update_hash(state.zhash, state, cap);
+
+            transposition_table.prefetch(next_hash);
+            eval_cache.prefetch(next_hash);
+
+            sc.moves[ply] = cap;
+            sc.conthist[ply] = sc.history.get_continuation_history_table(cap);
+            sc.reduction[ply] = 0;
+            sc.stats.nodes += 1;
+
+            unmake_restore restore = state.make_move(cap, next_hash);
+
+            int32_t score = -quisearch(state, -probcut_beta, 1-probcut_beta, 0, ply+1, sc, false);
+            if (score >= probcut_beta) {
+                score = -alphabeta(state, -probcut_beta, 1-probcut_beta, probcut_depth, ply+1, sc, line, nullptr, ALL_NODE);
+            }
+
+            state.unmake_move(cap, restore);
+
+            if (score >= probcut_beta) {
+                if (!tt_hit) {
+                    transposition_table[zhash].store(zhash, cap, probcut_depth+1, CUT_NODE, score, raw_eval, ply, current_cache_age);
+                }
+                return score;
+            }
+        }
+    }
+
+
+
     //Singular search
     //When tt entry is found which is marked as cut or pv node, reduced search is performed to check if there is alternative good moves
     //When singular search fails high, there might be other moves which can be either better or equally good
@@ -738,7 +795,6 @@ int32_t alphabeta_search::alphabeta(board_state &state, int32_t alpha, int32_t b
         ply + depth < 2*nominal_search_depth)
     {
         int restore_prior_reduction = sc.reduction[ply-1];
-        sc.moves[ply] = chess_move::null_move();
 
         int32_t singular_beta = tt_score - (2*depth);
         int32_t score = alphabeta(state, singular_beta-1, singular_beta, depth / 2, ply, sc, line, &tt_move, (is_cut ? CUT_NODE : ALL_NODE));
@@ -784,7 +840,6 @@ int32_t alphabeta_search::alphabeta(board_state &state, int32_t alpha, int32_t b
     chess_move mov;
     int move_type = MOVES_END;
 
-
     while ((move_type = mpicker.pick(mov)) != MOVES_END) {
         if (skip_move && mov == *skip_move) {
             mpicker.previus_pick_was_skipped(mov);
@@ -806,11 +861,10 @@ int32_t alphabeta_search::alphabeta(board_state &state, int32_t alpha, int32_t b
 
         //Forward pruning at low depth
         if (best_score != MIN_EVAL && !is_mate_score(best_score) && ply > 2) {
-            int d = depth;
-            int rd = std::clamp(depth - reductions, (d+1)/2, d);
+            int lmr_depth = std::clamp(depth - reductions, (depth+1)/2, depth);
 
-            if ((mpicker.legal_moves >= (d*d+6)   && improving) ||
-                (mpicker.legal_moves >= (d*d+6)/2 && !improving)) {
+            if ((mpicker.legal_moves >= (depth*depth+6)   && improving) ||
+                (mpicker.legal_moves >= (depth*depth+6)/2 && !improving)) {
                 mpicker.skip_quiets(); //Late move pruning. Currently does not prune killers
             }
 
@@ -822,26 +876,36 @@ int32_t alphabeta_search::alphabeta(board_state &state, int32_t alpha, int32_t b
                 bool can_be_pruned = (!in_check && !is_promotion && !causes_check && !is_pv);
 
                 //History pruning. If move have bad quiet history, skip it
-                int32_t history_treshold = -d * sp.hmargin_mult;
+                int32_t history_treshold = -depth * sp.hmargin_mult;
                 if (can_be_pruned &&
                     move_type != KILLER_MOVE &&
                     history_score < history_treshold &&
-                    d < 6) {
+                    depth < 6) {
                     prune = true;
                 }
 
                 //Futility pruning. If static evaluation is way belove alpha, skip move
                 //Futility margin gets smaller for later moves
-                int32_t fmargin = sp.fmargin_base + sp.fmargin_mult*rd;
+                int32_t fmargin = sp.fmargin_base + sp.fmargin_mult*lmr_depth;
                 if (can_be_pruned &&
                     eval + fmargin < alpha &&
-                    rd < 8) {
+                    lmr_depth < 8) {
                     prune = true;
                 }
+
+                //SEE pruning for quiet moves.
+                //If SEE indicates quiet move loses material, its gets pruned
+                if (!prune && !is_pv && !in_check && depth < 6) {
+                    int32_t see_treshold = -depth*depth * sp.quiet_see_margin_mult;
+                    if (static_exchange_evaluation(state, mov) < see_treshold) {
+                        prune = true;
+                    }
+                }
             } else {
-                //SEE pruning. If capture SEE is below treshold, skip capture
-                int32_t see_treshold = -d * sp.see_margin_mult;
-                if (!is_pv && d < 6 && static_exchange_evaluation(state, mov) < see_treshold) {
+                //SEE pruning for captures.
+                //If SEE indicates capture is really bad, its gets pruned
+                int32_t see_treshold = -depth * sp.cap_see_margin_mult;
+                if (!is_pv && depth < 6 && static_exchange_evaluation(state, mov) < see_treshold) {
                     prune = true;
                 }
             }

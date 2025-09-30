@@ -31,10 +31,13 @@ struct search_params
         fmargin_mult = 70;
         hmargin_mult = 3893;
         lmr_hist_adjust = 7079;
-        see_margin_mult = 120;
+        cap_see_margin_mult = 120;
+        quiet_see_margin_mult = 24;
         lmr_modifier = 17;
 
         razoring_margin = 200;
+
+        probcut_margin = 180;
 
         good_quiet_treshold = -1000;
     }
@@ -52,18 +55,21 @@ struct search_params
             int hmargin_mult;
 
             int lmr_hist_adjust;
-            int see_margin_mult;
+            int cap_see_margin_mult;
+            int quiet_see_margin_mult;
             int lmr_modifier;
 
             int razoring_margin;
 
+            int probcut_margin;
+
             int good_quiet_treshold;
         };
-        int data[11];
+        int data[13];
     };
 
     static int get_variable_index(std::string name) {
-        for (int i = 0; i < 11; i++) {
+        for (int i = 0; i < 13; i++) {
             if (name == get_variable_name(i)) {
                 return i;
             }
@@ -73,7 +79,7 @@ struct search_params
 
     static std::string get_variable_name(int index)
     {
-        const char *str[11] = {
+        const char *str[13] = {
             "rfmargin_base",
             "rfmargin_mult",
             "rfmargin_improving_modifier",
@@ -81,20 +87,22 @@ struct search_params
             "fmargin_mult",
             "hmargin_mult",
             "lmr_hist_adjust",
-            "see_margin_mult",
+            "cap_see_margin_mult",
+            "quiet_see_margin_mult",
             "lmr_modifier",
             "razoring_margin",
+            "probcut_margin",
             "good_quiet_treshold"
         };
 
-        if (index >= 0 && index < 11) {
+        if (index >= 0 && index < 13) {
             return std::string(str[index]);
         }
         return std::string("check that fucking index");
     }
 
     static void get_limits(int index, int &minv, int &maxv) {
-        int limits[22] = {
+        int limits[26] = {
             0, 100,
             40, 140,
             20, 100,
@@ -103,12 +111,14 @@ struct search_params
             2000, 10000,
             4000, 10000,
             80, 200,
+            10, 50,
             10, 30,
             150, 300,
+            100, 300,
             -3000, 3000
         };
 
-        if (index >= 0 && index < 11) {
+        if (index >= 0 && index < 13) {
             minv = limits[index*2 + 0];
             maxv = limits[index*2 + 1];
         }

@@ -1,6 +1,6 @@
 # UCI chess engine
 
-Estimated strength 3450 Elo (Blitz)
+Estimated strength 3500 Elo (Blitz)
 
 ## efficiently updatable neural network (NNUE) evaluation
 - 16 king buckets (total 2x16x768 inputs)

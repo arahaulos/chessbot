@@ -1,6 +1,5 @@
 #pragma once
 
-
 inline int32_t static_exchange_evaluation(board_state &state, chess_move m)
 {
     //SEE does not work for en passant. Return 0
@@ -31,7 +30,9 @@ inline int32_t static_exchange_evaluation(board_state &state, chess_move m)
 
     bitboard mask = ~((uint64_t)0);
 
-    while (true) {
+    bool found = false;
+
+    do {
         occupation &= ~from_sq_bb;
         occupation |= to_sq_bb;
 
@@ -51,7 +52,7 @@ inline int32_t static_exchange_evaluation(board_state &state, chess_move m)
                                   bitboard_utils.queen_attack(to_sq, occupation, mask),
                                   bitboard_utils.king_attack(to_sq, mask)};
 
-        bool found = false;
+        found = false;
 
         for (int i = PAWN; i <= KING; i++) {
             bitboard bb = bitboards[i][turn] & attacks[i];
@@ -63,22 +64,16 @@ inline int32_t static_exchange_evaluation(board_state &state, chess_move m)
                 break;
             }
         }
-        if (!found) {
-            break;
-        }
-    }
+    } while (found);
+
     see_eval[num_of_captures] = 0;
     for (int i = num_of_captures-1; i >= 1; i--) {
         see_eval[i] = std::max(0, victim_values[i] - see_eval[i+1]);
     }
     see_eval[0] = victim_values[0] - see_eval[1];
 
-
     return see_eval[0];
 }
-
-
-
 
 
 

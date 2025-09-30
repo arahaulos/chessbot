@@ -225,7 +225,7 @@ void application::run_benchmark()
     uint64_t total_nodes = 0;
     auto start_time = std::chrono::high_resolution_clock::now();
 
-    for (int i = 0; i < 10; i++) {
+    for (int i = 0; i < 5; i++) {
 
         total_nodes += bench_position("2rq1r1k/pp3ppp/3n4/n2p4/1Q6/2PBBP1P/P4P2/2KR2R1 w - - 0 19", 20);
 

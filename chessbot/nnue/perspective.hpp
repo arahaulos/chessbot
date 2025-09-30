@@ -326,24 +326,27 @@ struct nnue_perspective
 
         __m128i idx_lo = _mm_set_epi16(7, 6, 5, 4, 3, 2, 1, 0);
         __m128i idx_hi = _mm_set_epi16(15, 14, 13, 12, 11, 10, 9, 8);
-        __m128i idx_add = _mm_set1_epi16(16);
 
-        __m256i minv = _mm256_set1_epi16(0);
-        __m256i maxv = _mm256_set1_epi16(halfkp_quantization_fractions);
+        const __m128i idx_add = _mm_set1_epi16(16);
+
+        const __m256i minv = _mm256_set1_epi16(0);
+        const __m256i maxv = _mm256_set1_epi16(halfkp_quantization_fractions);
 
         for (int i = 0; i < NEURONS; i += 16) {
             __m256i acc = _mm256_load_si256((__m256i*)&accul[i]);
 
-            int qt_mm = _mm256_movemask_epi8(_mm256_cmpgt_epi16(acc, minv));
+            const __m256i z = _mm256_setzero_si256();
 
-            uint32_t qt_lo = _pext_u32(qt_mm, 0x0000AAAA);
-            uint32_t qt_hi = _pext_u32(qt_mm, 0xAAAA0000);
+            uint32_t gt_mm = _mm256_movemask_epi8(_mm256_packs_epi16(_mm256_cmpgt_epi16(acc, z), z));
 
-            __m128i ctl_lo = _mm_load_si128((__m128i*)&shuffle_lut[qt_lo*16]);
-            __m128i ctl_hi = _mm_load_si128((__m128i*)&shuffle_lut[qt_hi*16]);
+            uint32_t gt_lo = gt_mm & 0xFF;
+            uint32_t gt_hi = gt_mm >> 16;
 
-            int k_lo = _mm_popcnt_u32(qt_lo);
-            int k_hi = _mm_popcnt_u32(qt_hi);
+            __m128i ctl_lo = _mm_load_si128((__m128i*)&shuffle_lut[gt_lo*16]);
+            __m128i ctl_hi = _mm_load_si128((__m128i*)&shuffle_lut[gt_hi*16]);
+
+            int k_lo = _mm_popcnt_u32(gt_lo);
+            int k_hi = _mm_popcnt_u32(gt_hi);
 
             __m256i act = _mm256_min_epi16(_mm256_max_epi16(acc, minv), maxv);
 

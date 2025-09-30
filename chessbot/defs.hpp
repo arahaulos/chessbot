@@ -19,7 +19,7 @@ constexpr int MAX_MULTI_PV = 16;
 
 
 constexpr int TT_SIZE = 64;
-constexpr int EVAL_CACHE_SIZE = 4;
+constexpr int EVAL_CACHE_SIZE = 8;
 constexpr int DEFAULT_THREADS = 1;
 
 constexpr int BOARD_WIDTH = 8;

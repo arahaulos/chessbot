@@ -505,8 +505,6 @@ void nnue_trainer::test_nets(std::string training_net_file, std::string quantize
 
     visualize_net("vis", *training_nnue_weights);
 
-    //training_nnue_weights->perspective_weights.coalesce_factorizer_weights();
-
     training_nnue_weights->save_quantized(quantized_net_file);
 
     std::cout << "Loading quantized nnue..." << std::endl;
@@ -515,18 +513,16 @@ void nnue_trainer::test_nets(std::string training_net_file, std::string quantize
     quantized_nnue_weights->load(quantized_net_file);
     nnue_network quantized_nnue(quantized_nnue_weights);
 
-    /*int perspective_activations[num_perspective_neurons];
-    for (int i = 0; i < num_perspective_neurons; i++) {
-        perspective_activations[i] = 0;
-    }*/
 
-    float avg_error_nnue = 0.0f;
-    float avg_error_qnnue = 0.0f;
-    float avg_quantization_error = 0.0f;
+    float avg_error = 0.0f;
+
+    float nnue_mse = 0.0f;
+    float qnnue_mse = 0.0f;
+    float quantization_mse = 0.0f;
     float worst_quantization_error = 0.0f;
 
-    float avg_error_nnue_black = 0.0f;
-    float avg_error_nnue_white = 0.0f;
+    float black_nnue_mse = 0.0f;
+    float white_nnue_mse = 0.0f;
 
     int black_positions = 0;
     int white_positions = 0;
@@ -535,7 +531,7 @@ void nnue_trainer::test_nets(std::string training_net_file, std::string quantize
 
     int positions = 0;
 
-    std::cout << "Comparing..." << std::endl;
+    std::cout << "Evaluating..." << std::endl;
     for (size_t i = 0; i < test_set.size(); i++) {
         state.load_fen(test_set[i].fen);
 
@@ -548,53 +544,45 @@ void nnue_trainer::test_nets(std::string training_net_file, std::string quantize
         float qeval = (float)quantized_nnue.evaluate(state) / 100.0f;
         float eval = training_nnue.evaluate(state);
 
-        avg_error_nnue += (real - eval)*(real - eval);
-        avg_error_qnnue += (real - qeval)*(real - qeval);
+        nnue_mse += (real - eval)*(real - eval);
+        qnnue_mse += (real - qeval)*(real - qeval);
+        avg_error += std::abs(real - eval);
 
         if (state.get_turn() == WHITE) {
-            avg_error_nnue_white += (real - eval)*(real - eval);
+            white_nnue_mse += (real - eval)*(real - eval);
             white_positions += 1;
         } else {
-            avg_error_nnue_black += (real - eval)*(real - eval);
+            black_nnue_mse += (real - eval)*(real - eval);
             black_positions += 1;
         }
 
         worst_quantization_error = std::max(worst_quantization_error, std::abs(eval - qeval));
-
-        float abs_error = std::abs(eval - qeval);
-        if (abs_error > 0.5) {
-            //std::cout << "error: " << abs_error << "  Eval " << eval << "  Qeval " << qeval << " " << test_set[i].fen << std::endl;
-        }
-
-        avg_quantization_error += (eval - qeval)*(eval - qeval);
-
-
-        /*for (int i = 0; i < quantized_nnue.black_side.num_of_outputs; i++) {
-            perspective_activations[quantized_nnue.black_side.outputs_idx[i]] += 1;
-        }
-        for (int i = 0; i < quantized_nnue.white_side.num_of_outputs; i++) {
-            perspective_activations[quantized_nnue.white_side.outputs_idx[i]] += 1;
-        }*/
+        quantization_mse += (eval - qeval)*(eval - qeval);
     }
-    avg_error_nnue = sqrt(avg_error_nnue / positions);
-    avg_error_qnnue = sqrt(avg_error_qnnue / positions);
-    avg_quantization_error = sqrt(avg_quantization_error / positions);
-
-    avg_error_nnue_black = sqrt(avg_error_nnue_black / black_positions);
-    avg_error_nnue_white = sqrt(avg_error_nnue_white / white_positions);
 
 
 
-    /*std::cout << "Activations: " << std::endl;
-    for (int i = 0; i < num_perspective_neurons; i++) {
-        std::cout << i << ": " << perspective_activations[i] << " " << (double)perspective_activations[i]*50.0f / positions << "%" << std::endl;
-    }*/
+    nnue_mse = nnue_mse / positions;
+    qnnue_mse = qnnue_mse / positions;
+    quantization_mse = quantization_mse / positions;
+    avg_error = avg_error / positions;
+
+    black_nnue_mse = black_nnue_mse / black_positions;
+    white_nnue_mse = white_nnue_mse / white_positions;
+
+    float nnue_rmse = sqrt(nnue_mse);
+    float qnnue_rmse = sqrt(qnnue_mse);
+
+    float quantization_rmse = sqrt(quantization_mse);
+    float black_rmse = sqrt(black_nnue_mse);
+    float white_rmse = sqrt(white_nnue_mse);
 
 
 
-    std::cout << "NNUE: " << avg_error_nnue << "  Quantized NNUE: " << avg_error_qnnue << std::endl;
-    std::cout << "Avg quantization error: " << avg_quantization_error << "   Worst quantization error: " << worst_quantization_error << std::endl;
-    std::cout << "White NNUE: " << avg_error_nnue_white << " Black NNUE: " << avg_error_nnue_black << std::endl;
+    std::cout << "NNUE avg error: " << avg_error << std::endl;
+    std::cout << "NNUE rmse: " << nnue_rmse << "  Quantized NNUE rmse: " << qnnue_rmse << std::endl;
+    std::cout << "Quantization rmse: " << quantization_rmse << "   Worst quantization error: " << worst_quantization_error << std::endl;
+    std::cout << "White NNUE rmse: " << white_rmse << " Black NNUE rmse: " << black_rmse << std::endl;
 }
 
 

@@ -168,6 +168,7 @@ struct history_heurestic_table
                 buffer[index++] = killer_moves[ply-2][i];
             }
         }
+
         return index;
     }
 

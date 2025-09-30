@@ -299,7 +299,7 @@ struct nnue_layer
         }
     }
 
-    void update(int bucket, int16_t *prev_layer0, int16_t *prev_layer0_idx, int ni0, int16_t *prev_layer1, int16_t *prev_layer1_idx, int ni1) {
+    void update(int bucket, int16_t *prev_layer0, int16_t *prev_layer_active_outputs0, int num_of_active_inputs0, int16_t *prev_layer1, int16_t *prev_layer_active_outputs1, int num_of_active_inputs1) {
         constexpr int shift = (IS_OUTPUT_LAYER ? output_quantization_shift : layer_quantization_shift);
 
         int16_t *weights0_ptr = (int16_t*)__builtin_assume_aligned(&weights->transposed_weights[bucket*IN*OUT], 32);
@@ -309,8 +309,8 @@ struct nnue_layer
         int16_t *p_layer0 = (int16_t*)__builtin_assume_aligned(prev_layer0, 32);
         int16_t *p_layer1 = (int16_t*)__builtin_assume_aligned(prev_layer1, 32);
 
-        int16_t *p_layer0_idx = (int16_t*)__builtin_assume_aligned(prev_layer0_idx, 32);
-        int16_t *p_layer1_idx = (int16_t*)__builtin_assume_aligned(prev_layer1_idx, 32);
+        int16_t *p_layer0_idx = (int16_t*)__builtin_assume_aligned(prev_layer_active_outputs0, 32);
+        int16_t *p_layer1_idx = (int16_t*)__builtin_assume_aligned(prev_layer_active_outputs1, 32);
 
         __m256i acc[OUT / 8];
 
@@ -318,7 +318,7 @@ struct nnue_layer
             acc[i] = _mm256_set1_epi32(0);
         }
 
-        for (int i = 0; i < ni0; i += 4) {
+        for (int i = 0; i < num_of_active_inputs0; i += 4) {
             int16_t idx0 = p_layer0_idx[i];
             int16_t idx1 = p_layer0_idx[i+1];
             int16_t idx2 = p_layer0_idx[i+2];
@@ -347,7 +347,7 @@ struct nnue_layer
             }
         }
 
-        for (int i = 0; i < ni1; i += 4) {
+        for (int i = 0; i < num_of_active_inputs1; i += 4) {
             int16_t idx0 = p_layer1_idx[i];
             int16_t idx1 = p_layer1_idx[i+1];
             int16_t idx2 = p_layer1_idx[i+2];

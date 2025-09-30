@@ -214,6 +214,7 @@ struct move_picker
             if (m == tt_move) {
                 continue;
             }
+
             int32_t score = history_table->get_quiet_history(ply, m) + get_threats_score(m);
 
             killers.add(m, score);
