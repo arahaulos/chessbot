@@ -13,12 +13,11 @@
 #include <atomic>
 #include <chrono>
 #include "state.hpp"
-#include "opening_book.hpp"
 #include "transposition.hpp"
 #include "defs.hpp"
 #include "history.hpp"
 #include "movepicker.hpp"
-#include "time_managment.hpp"
+#include "timeman.hpp"
 
 struct search_params
 {
@@ -34,9 +33,7 @@ struct search_params
         cap_see_margin_mult = 120;
         quiet_see_margin_mult = 24;
         lmr_modifier = 17;
-
         razoring_margin = 200;
-
         probcut_margin = 180;
 
         good_quiet_treshold = -1000;
@@ -473,7 +470,6 @@ public:
     }
 
     bool test_flag;
-    bool use_opening_book;
 
     chess_move fast_search(board_state &state, int depth, int max_nodes);
     void abort_fast_search()  {
@@ -510,7 +506,6 @@ private:
     cache<tt_bucket, TT_SIZE> transposition_table;
     cache<eval_cache_bucket, EVAL_CACHE_SIZE> eval_cache;
 
-    opening_book book;
     board_state state_to_search;
 
 

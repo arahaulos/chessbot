@@ -23,12 +23,8 @@ public:
 
         allocate_data(size, false);
 
-        /*for (uint64_t i = 0; i < size; i++) {
-            new (&data[i])T(other.data[i]);
-        }*/
-
         for (uint64_t i = 0; i < size; i++) {
-            data[i] = other.data[i];
+            new (&data[i])T(other.data[i]);
         }
     }
 
@@ -70,22 +66,18 @@ private:
         memory = new uint8_t[s*sizeof(T)+64];
         data = (T*)((size_t)memory + 64 - ((size_t)memory % 64));
 
-        for (int i = 0; i < s; i++) {
-            data[i].clear();
-        }
-
-        /*if (construct) {
+        if (construct) {
             for (int i = 0; i < s; i++) {
                 new (&data[i])T();
             }
-        }*/
+        }
     }
 
     void free_data()
     {
-        /*for (int i = 0; i < size; i++) {
+        for (int i = 0; i < size; i++) {
             data[i].~T();
-        }*/
+        }
         delete [] memory;
     }
 

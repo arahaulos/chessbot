@@ -12,8 +12,6 @@
 #include "../nnue.hpp"
 
 #include "../../search.hpp"
-#include "../../tuning.hpp"
-
 
 void randomize_floats(float *f, int n, float std_mean, float std_deviation, std::mt19937 &gen)
 {
@@ -59,16 +57,6 @@ void init_weights(training_weights &weights, bool init_perspectives_weights)
 
     if (init_perspectives_weights) {
         randomize_floats(weights.perspective_weights.biases, weights.perspective_weights.num_of_biases(), 0, perspective_deviation, gen);
-        /*std::normal_distribution nd{0.0f, perspective_deviation};
-        for (size_t i = 0; i < inputs_per_bucket; i++) {
-            for (size_t j = 0; j < num_perspective_neurons; j++) {
-
-                size_t input = num_of_king_buckets*inputs_per_bucket + i;
-
-                weights.perspective_weights.weights[input*num_perspective_neurons + j] = nd(gen);
-
-            }
-        }*/
 
         for (size_t i = 0; i < inputs_per_bucket; i++) {
             for (size_t j = 0; j < num_perspective_neurons; j++) {
@@ -619,7 +607,7 @@ void training_loop(std::string net_file, std::string qnet_file, std::shared_ptr<
     worker_thread_pool thread_pool(16, weights, gradient, gradient_sq, first_moment, second_moment, corrected_first_moment, corrected_second_moment);
 
     bool use_factorized = true;
-    float learning_rate = 0.0002f;
+    float learning_rate = 0.0001f;
     float beta1 = 0.9f;
     float beta2 = 0.999f;
     int batch_size = 4000*thread_pool.get_pool_size();
@@ -732,6 +720,128 @@ float nnue_trainer::find_scaling_factor_for_net(std::string qnet_file, std::vect
     std::cout << "Scaling factor: " << scaling_factor << std::endl;
 
     return scaling_factor;
+}
+
+
+
+void nnue_trainer::optimize_quantized_net(std::string input_file, std::string output_file, std::vector<selfplay_result> &test_set)
+{
+    //Sorts neurons based on probability of activation
+
+    std::shared_ptr<nnue_weights> weights = std::make_shared<nnue_weights>();
+    std::shared_ptr<nnue_weights> optimized_weights = std::make_shared<nnue_weights>();
+    weights->load(input_file);
+    optimized_weights->load(input_file);
+
+    nnue_network nnue(weights);
+
+    constexpr int N = num_perspective_neurons;
+
+    std::vector<std::pair<int, int>> act;
+    for (int j = 0; j < N; j++) {
+        act.emplace_back(j, 0);
+    }
+
+    board_state state;
+
+    std::cout << "Evaluating..." << std::endl;
+    for (size_t i = 0; i < test_set.size(); i++) {
+        state.load_fen(test_set[i].fen);
+        nnue.evaluate(state);
+
+        int16_t *white_activations = nnue.get_perspective_activations(WHITE);
+        int16_t *black_activations = nnue.get_perspective_activations(BLACK);
+        for (int j = 0; j < N; j++) {
+            act[j].second += (white_activations[j] > 0);
+            act[j].second += (black_activations[j] > 0);
+        }
+    }
+
+
+    std::cout << "Activations" << std::endl;
+
+    for (int j = 0; j < N; j++) {
+        std::cout << j << ": " << std::setprecision(3) << ((double)act[j].second*50 / test_set.size()) << "%"  << std::endl;
+    }
+
+
+    std::cout << "Sorting neurons..." << std::endl;
+
+    std::sort(act.begin(), act.end(), [] (auto &a, auto &b) {return a.second > b.second;});
+
+    int16_t *src_persp_weights = weights->perspective_weights.weights;
+    int16_t *src_persp_biases = weights->perspective_weights.biases;
+
+    int16_t *dst_persp_weights = optimized_weights->perspective_weights.weights;
+    int16_t *dst_persp_biases = optimized_weights->perspective_weights.biases;
+
+    for (int i = 0; i < N; i++) {
+        int src_index = act[i].first;
+        int dst_index = i;
+
+        for (int j = 0; j < num_perspective_inputs; j++) {
+            dst_persp_weights[j * N + dst_index] = src_persp_weights[j * N + src_index];
+        }
+        dst_persp_biases[dst_index] = src_persp_biases[src_index];
+    }
+
+
+    for (int b = 0; b < layer_stack_size; b++) {
+        int16_t *src_layer_weights = &weights->layer1_weights.weights[b*2*N*layer1_neurons];
+        int16_t *dst_layer_weights = &optimized_weights->layer1_weights.weights[b*2*N*layer1_neurons];
+
+        for (int i = 0; i < layer1_neurons; i++) {
+            for (int j = 0; j < N; j++) {
+                int src_index0 = act[j].first;
+                int dst_index0 = j;
+
+                int src_index1 = act[j].first + N;
+                int dst_index1 = j + N;
+
+                dst_layer_weights[i*2*N + dst_index0] = src_layer_weights[i*2*N + src_index0];
+                dst_layer_weights[i*2*N + dst_index1] = src_layer_weights[i*2*N + src_index1];
+            }
+        }
+
+        int16_t *dst_layer_transposed_weights = &optimized_weights->layer1_weights.transposed_weights[b*2*N*layer1_neurons];
+        for (int i = 0; i < layer1_neurons; i++) {
+            for (int j = 0; j < 2*N; j++) {
+                dst_layer_transposed_weights[j*layer1_neurons + i] = dst_layer_weights[i*2*N + j];
+            }
+        }
+
+    }
+
+
+    nnue_network optimized_nnue(optimized_weights);
+
+    std::cout << "Validating..." << std::endl;
+
+    std::for_each(act.begin(), act.end(), [] (auto &x) {x.second = 0;});
+
+    for (size_t i = 0; i < test_set.size(); i++) {
+        state.load_fen(test_set[i].fen);
+        if (nnue.evaluate(state) != optimized_nnue.evaluate(state)) {
+            std::cout << "Validation failed!!!" << std::endl;
+            return;
+        }
+
+        int16_t *white_activations = optimized_nnue.get_perspective_activations(WHITE);
+        int16_t *black_activations = optimized_nnue.get_perspective_activations(BLACK);
+        for (int j = 0; j < N; j++) {
+            act[j].second += (white_activations[j] > 0);
+            act[j].second += (black_activations[j] > 0);
+        }
+    }
+
+    std::cout << "Activations after optimization" << std::endl;
+    for (int j = 0; j < N; j++) {
+        std::cout << j << ": " << std::setprecision(3) << ((double)act[j].second*50 / test_set.size()) << "%"  << std::endl;
+    }
+
+    std::cout << "Saving optimized NNUE" << std::endl;
+    optimized_weights->save(output_file);
+
 }
 
 

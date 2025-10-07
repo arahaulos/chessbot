@@ -4,21 +4,69 @@
 #include <math.h>
 
 
-int sliding_vectors_table[8*2] =
+uint64_t deposit_bits(uint64_t bits, uint64_t pattern)
+{
+    uint64_t result = 0;
+
+    while (pattern) {
+        uint8_t index = bit_scan_forward_clear(pattern);
+        result |= ((bits & 0x1) << index);
+        bits >>= 1;
+    }
+
+    return result;
+}
+
+uint64_t find_magic(const uint64_t &pattern, int bits)
+{
+    static uint64_t rand = 123456789123456789;
+
+    int lookups = std::pow(2, bits);
+
+    uint64_t occ[4096];
+    bool used[4096];
+
+    for (int i = 0; i < lookups; i++) {
+        occ[i] = deposit_bits(i, pattern);
+    }
+
+    uint64_t magic = 0;
+    uint8_t shift = 64 - bits;
+    bool found = false;
+    while (!found) {
+        magic = ~0ull;
+        for (int i = 0; i < 3; i++) {
+            rand ^= rand >> 12;
+            rand ^= rand << 25;
+            rand ^= rand >> 27;
+            magic &= (rand * 0x2545F4914F6CDD1DULL);
+        }
+
+        if (pop_count((pattern * magic) & 0xFF00000000000000ull) < 6) {
+            continue;
+        }
+        for (int i = 0; i < lookups; i++) {
+            used[i] = false;
+        }
+        found = true;
+        for (int i = 0; i < lookups; i++) {
+            uint64_t index = ((occ[i] * magic) >> shift);
+            if (used[index]) {
+                found = false;
+                break;
+            }
+            used[index] = true;
+        }
+    }
+
+    return magic;
+}
+
+
+
+static const int sliding_vectors_table[8*2] =
 {
     1, 1, 1, -1, -1, 1, -1, -1, 1, 0, -1, 0, 0, 1, 0, -1
-};
-
-int distance_to_center[64] =
-{
-    4, 4, 4, 4, 4, 4, 4, 4,
-    4, 3, 3, 3, 3, 3, 3, 4,
-    4, 3, 2, 2, 2, 2, 3, 4,
-    4, 3, 2, 1, 1, 2, 3, 4,
-    4, 3, 2, 1, 1, 2, 3, 4,
-    4, 3, 2, 2, 2, 2, 3, 4,
-    4, 3, 3, 3, 3, 3, 3, 4,
-    4, 4, 4, 4, 4, 4, 4, 4
 };
 
 
@@ -123,49 +171,74 @@ bitboard bitboard_utility::get_sliding_xray_pattern(int sq_index, bitboard occ, 
     return moves;
 }
 
-
 void bitboard_utility::init_bishop_lookup()
 {
     uint32_t lookup_offset = 0;
 
     for (int i = 0; i < 64; i++) {
+
         bitboard pattern = get_sliding_pattern(i, 0, false, true, false);
-
-        bishop_pattern0[i] = pattern;
-        bishop_lookup_offset[i] = lookup_offset;
-
-
-        int bits = __builtin_popcountll(pattern);
+        int bits = pop_count(pattern);
         int lookups = std::pow(2, bits);
 
+        bishop_pattern[i].pattern = pattern;
+        bishop_pattern[i].offset = lookup_offset;
+
+        #if !USE_PEXT
+
+        bishop_pattern[i].magic = find_magic(pattern, bits);
+        bishop_pattern[i].shift = 64 - bits;
+
+        #endif
+
         for (int j = 0; j < lookups; j++) {
-            bitboard occ = _pdep_u64((uint64_t)j, pattern);
-            bishop_lookup[lookup_offset + j] = get_sliding_pattern(i, occ, false, true, true);
-            bishop_xray_lookup[lookup_offset + j] = get_sliding_xray_pattern(i, occ, false, true, true);
+            bitboard occ = deposit_bits(j, pattern);
+
+            #if USE_PEXT
+            uint32_t index = j;
+            #else
+            uint32_t index = ((occ * bishop_pattern[i].magic) >> bishop_pattern[i].shift);
+            #endif
+
+
+            bishop_lookup[lookup_offset + index] = get_sliding_pattern(i, occ, false, true, true);
+            bishop_xray_lookup[lookup_offset + index] = get_sliding_xray_pattern(i, occ, false, true, true);
         }
 
         lookup_offset += lookups;
     }
 }
 
-void bitboard_utility::init_rook_lookup() {
-
+void bitboard_utility::init_rook_lookup()
+{
     uint32_t lookup_offset = 0;
 
     for (int i = 0; i < 64; i++) {
         bitboard pattern = get_sliding_pattern(i, 0, true, false, false);
-
-        rook_pattern0[i] = pattern;
-        rook_lookup_offset[i] = lookup_offset;
-
-
-        int bits = __builtin_popcountll(pattern);
+        int bits = pop_count(pattern);
         int lookups = std::pow(2, bits);
 
+        rook_pattern[i].pattern = pattern;
+        rook_pattern[i].offset = lookup_offset;
+
+        #if !USE_PEXT
+
+        rook_pattern[i].magic = find_magic(pattern, bits);
+        rook_pattern[i].shift = 64 - bits;
+
+        #endif
+
         for (int j = 0; j < lookups; j++) {
-            bitboard occ = _pdep_u64((uint64_t)j, pattern);
-            rook_lookup[lookup_offset + j] = get_sliding_pattern(i, occ, true, false, true);
-            rook_xray_lookup[lookup_offset + j] = get_sliding_xray_pattern(i, occ, true, false, true);
+            bitboard occ = deposit_bits(j, pattern);
+
+            #if USE_PEXT
+            uint32_t index = j;
+            #else
+            uint32_t index = ((occ * rook_pattern[i].magic) >> rook_pattern[i].shift);
+            #endif
+
+            rook_lookup[lookup_offset + index] = get_sliding_pattern(i, occ, true, false, true);
+            rook_xray_lookup[lookup_offset + index] = get_sliding_xray_pattern(i, occ, true, false, true);
         }
 
         lookup_offset += lookups;
@@ -316,85 +389,6 @@ void bitboard_utility::init_king_tables()
 }
 
 
-void bitboard_utility::init_file_rank_lookups()
-{
-    for (int i = 0; i < 8; i++) {
-        bitboard f = 0;
-        bitboard r = 0;
-        for (int j = 0; j < 8; j++) {
-            set_occupation(i*8+j, r, true);
-            set_occupation(j*8+i, f, true);
-        }
-
-        bitboard_files[i] = f;
-        bitboard_ranks[i] = r;
-    }
-
-
-    for (int i = 0; i < 8; i++) {
-        bitboard neightbor_files = 0;
-        if (i > 0) {
-            neightbor_files |= bitboard_files[i-1];
-        }
-        if (i < 7) {
-            neightbor_files |= bitboard_files[i+1];
-        }
-        bitboard_neighbor_files[i] = neightbor_files;
-    }
-
-}
-
-void bitboard_utility::init_passed_pawn_lookups()
-{
-    for (int i = 0; i < 64; i++) {
-        int sx = i % 8;
-        int sy = i / 8;
-
-
-        bitboard bb = 0;
-        bitboard wb = 0;
-        for (int y = sy+1; y < 8; y++) {
-            for (int x = sx-1; x <= sx+1; x++) {
-                if (x >= 0 && y >= 0 && x < 8 && y < 8) {
-                    set_occupation(y*8+x, bb, true);
-                }
-            }
-        }
-        for (int y = sy-1; y >= 0; y--) {
-            for (int x = sx-1; x <= sx+1; x++) {
-                if (x >= 0 && y >= 0 && x < 8 && y < 8) {
-                    set_occupation(y*8+x, wb, true);
-                }
-            }
-        }
-
-        passed_pawn_mask[i][0] = wb;
-        passed_pawn_mask[i][1] = bb;
-    }
-}
-
-
-void bitboard_utility::init_board_area_masks()
-{
-    center_board_mask = 0;
-    extended_center_board_mask = 0;
-
-    for (int y = 0; y < 8; y++) {
-        for (int x = 0; x < 8; x++) {
-            int sq = y*8+x;
-
-            if (y >= 2 && y <= 5) {
-                set_occupation(sq, extended_center_board_mask, true);
-            }
-            if (y >= 3 && y <= 4) {
-                set_occupation(sq, center_board_mask, true);
-            }
-        }
-    }
-
-
-}
-
 
 bitboard_utility::bitboard_utility() {
     std::cout << "Initializing bitboard lookup tables... ";
@@ -407,11 +401,18 @@ bitboard_utility::bitboard_utility() {
     init_knight_tables();
     init_bishop_lookup();
     init_rook_lookup();
-    init_file_rank_lookups();
-    init_passed_pawn_lookups();
-    init_board_area_masks();
 
     std::cout << "done." << std::endl;
+
+    #if USE_PEXT
+
+    std::cout << "Using PEXT bitboards" << std::endl;
+
+    #else
+
+    std::cout << "Using magic bitboards" << std::endl;
+
+    #endif // PEXT
 }
 
 void print_bitboard(bitboard bb)

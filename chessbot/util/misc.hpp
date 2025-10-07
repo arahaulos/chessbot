@@ -1,9 +1,8 @@
 #pragma once
 
-#include <string>
-#include "game.hpp"
-#include "search.hpp"
-
+#include <math.h>
+#include "../game.hpp"
+#include "../search.hpp"
 
 struct position_evaluation
 {
@@ -54,14 +53,52 @@ struct selfplay_result
     chess_move bm;
 };
 
-bool load_selfplay_results(std::vector<selfplay_result> &results, std::string filename);
+
+std::vector<std::string> load_opening_suite(std::string filename);
 bool save_selfplay_results(std::vector<selfplay_result> &results, std::string filename);
+bool load_selfplay_results(std::vector<selfplay_result> &results, std::string filename);
 
-
-struct tuning_utility
+inline double score_to_elo(double score)
 {
-    static void selfplay(std::string output_file, std::string nnue_file, int threads, int games, int depth, int nodes, bool random_opening);
+    return -std::log10(1.0/score-1.0)*400.0;
+}
 
-    static int test(int games, int time, int time_inc, alphabeta_search &bot0, alphabeta_search &bot1, int workers, std::string uci_engine, double elo0 = 0.0f, double elo1 = 3.0f, double alpha = 0.05f, double beta = 0.05f);
-    static void tune_search_params(int time, int time_inc, int threads, int num_of_games, const std::vector<std::string> &params_to_tune);
+inline double elo_to_score(double elo)
+{
+   return 1.0f / (std::pow(10.0f, -elo/400.0f)+1.0f);
+}
+
+struct match_stats
+{
+    match_stats() {
+        wins = 0;
+        losses = 0;
+        draws = 0;
+
+        bot0_depth = 0;
+        bot1_depth = 0;
+
+        bot0_nps = 0;
+        bot1_nps = 0;
+
+        bot0_moves = 0;
+        bot1_moves = 0;
+    }
+
+
+    int wins;
+    int losses;
+    int draws;
+
+    int bot0_depth;
+    int bot1_depth;
+
+    int64_t bot0_nps;
+    int64_t bot1_nps;
+
+    int bot0_moves;
+    int bot1_moves;
 };
+
+
+int play_game_pair(alphabeta_search &bot0, alphabeta_search &bot1, const std::string &opening_fen, int base_time, int time_inc, bool bot0_playing_black, match_stats &stats);

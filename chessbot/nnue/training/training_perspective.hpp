@@ -2,7 +2,7 @@
 
 #include "training_layer.hpp"
 
-#include "network_defs.hpp"
+#include "../nnue_defs.hpp"
 
 
 template <int INPUTS, int NEURONS>
@@ -105,13 +105,14 @@ struct training_perspective_weights
 
     void rmsprop(training_perspective_weights<INPUTS, NEURONS> *grad, training_perspective_weights<INPUTS, NEURONS> *pg, float learning_rate, int tid, int tc)
     {
+        float epsilon = 0.0000001f;
+
+        #if USE_AVX2
+
         __m256 cmin = _mm256_set1_ps(halfkp_quantization_clamp_min);
         __m256 cmax = _mm256_set1_ps(halfkp_quantization_clamp_max);
 
         __m256 lr = _mm256_set1_ps(learning_rate);
-
-        //__m256 epsilon = _mm256_set1_ps(0.0000001f);
-        float epsilon = 0.0000001f;
 
         int per_thread = INPUTS*NEURONS / tc;
         int start = per_thread*tid;
@@ -150,6 +151,22 @@ struct training_perspective_weights
                 _mm256_store_ps(&biases[i], nb);
             }
         }
+
+        #else
+
+        int per_thread = INPUTS*NEURONS / tc;
+        int start = per_thread*tid;
+
+        for (int i = start; i < start + per_thread; i++) {
+            weights[i] -= grad->weights[i]*learning_rate / sqrt(pg->weights[i] + epsilon);
+        }
+        if (tid == 0) {
+            for (int i = 0; i < NEURONS; i++) {
+                biases[i] -= grad->biases[i]*learning_rate / sqrt(pg->biases[i] + epsilon);
+            }
+        }
+
+        #endif
     }
 
 
@@ -213,15 +230,27 @@ struct training_perspective
     void reset() {
         num_of_active_inputs = 0;
 
+        #if USE_AVX2
+
         for (int i = 0; i < NEURONS; i += 8) {
             __m256 tmp = _mm256_load_ps(&weights->biases[i]);
 
             _mm256_store_ps(&acculumator[i], tmp);
         }
+
+        #else
+
+        for (int i = 0; i < NEURONS; i++) {
+            acculumator[i] = weights->biases[i];
+        }
+
+        #endif
     }
 
     void set_input(int index) {
         float *w = &weights->weights[index*NEURONS];
+
+        #if USE_AVX2
 
         for (int i = 0; i < NEURONS; i += 8) {
             __m256 a = _mm256_load_ps(&acculumator[i]);
@@ -231,6 +260,14 @@ struct training_perspective
 
             _mm256_store_ps(&acculumator[i], tmp);
         }
+
+        #else
+
+        for (int i = 0; i < NEURONS; i++) {
+            acculumator[i] += w[i];
+        }
+
+        #endif
 
         active_inputs[num_of_active_inputs++] = index;
     }
@@ -247,6 +284,8 @@ struct training_perspective
 
 
     void update() {
+        #if USE_AVX2
+
         __m256 cmin = _mm256_set1_ps(0.0f);
         __m256 cmax = _mm256_set1_ps(1.0f);
 
@@ -258,13 +297,23 @@ struct training_perspective
 
         }
 
+        #else
+
+        for (int i = 0; i < NEURONS; i++) {
+            neurons[i] = std::clamp(acculumator[i], 0.0f, 1.0f);
+        }
+
+        #endif
+
     }
 
     void back_propagate(training_perspective_weights<INPUTS, NEURONS> *gradients) {
+
+        #if USE_AVX2
+
+
         __m256 zero = _mm256_set1_ps(0.0f);
         __m256 one = _mm256_set1_ps(1.0f);
-
-
 
         for (int i = 0; i < NEURONS; i += 8) {
             __m256 x = _mm256_load_ps(&acculumator[i]);
@@ -283,7 +332,6 @@ struct training_perspective
         for (int i = 0; i < num_of_active_inputs; i++) {
             int input = active_inputs[i];
 
-
             for (int j = 0; j < NEURONS; j += 8) {
                 __m256 g0 = _mm256_load_ps(&grads[j]);
                 __m256 g1 = _mm256_load_ps(&gradients->weights[input*NEURONS + j]);
@@ -300,6 +348,28 @@ struct training_perspective
             _mm256_store_ps(&gradients->biases[i], _mm256_add_ps(g0, g1));
 
         }
+
+        #else
+
+        for (int i = 0; i < NEURONS; i++) {
+            float x = acculumator[i];
+            float dc = grads[i];
+            float da = ((x > 1.0f || x < 0.0f) ? 0.0f : x);
+
+            grads[i] = dc*da;
+        }
+
+        for (int i = 0; i < num_of_active_inputs; i++) {
+            int input = active_inputs[i];
+            for (int j = 0; j < NEURONS; j++) {
+                gradients->weights[input*NEURONS + j] += grads[j];
+            }
+        }
+        for (int i = 0; i < NEURONS; i++) {
+            gradients->biases[i] += grads[i];
+        }
+
+        #endif
     }
 
     float *neurons;

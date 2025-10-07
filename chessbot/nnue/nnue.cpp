@@ -125,9 +125,7 @@ void nnue_network::set_piece(piece p, square_index sq)
     int flipped_sq_index = sq_index^56;
     int flipped_color = (color == BLACK ? WHITE : BLACK);
 
-
     current_state->bb[type][color == BLACK] |= (0x1ULL << sq_index);
-
 
     int wksq = current_state->white_king_sq;
     int bksq = current_state->black_king_sq^56;
@@ -303,6 +301,36 @@ void nnue_weights::load(std::string path)
 
         delete [] encoded_data;
         delete [] decoded_data;
+    }
+    file.close();
+}
+
+void nnue_weights::save(std::string path)
+{
+    std::ofstream file(path.c_str(), std::ios::binary);
+    if (file.is_open()) {
+
+        size_t total_params = perspective_weights.num_of_biases() + perspective_weights.num_of_weights() +
+                              layer1_weights.num_of_biases() + layer1_weights.num_of_weights() +
+                              layer2_weights.num_of_biases() + layer2_weights.num_of_weights() +
+                              output_weights.num_of_biases() + output_weights.num_of_weights();
+
+
+        uint8_t *raw_data = new uint8_t[sizeof(int16_t)*total_params];
+        size_t index = 0;
+        perspective_weights.save((int16_t*)raw_data, index);
+        layer1_weights.save((int16_t*)raw_data, index);
+        layer2_weights.save((int16_t*)raw_data, index);
+        output_weights.save((int16_t*)raw_data, index);
+
+        uint8_t *encoded_data;
+        int encoded_size;
+        huffman_coder::encode(raw_data, total_params*sizeof(int16_t), encoded_data, encoded_size);
+
+        file.write((char*)encoded_data, encoded_size);
+
+        delete [] encoded_data;
+        delete [] raw_data;
     }
     file.close();
 }

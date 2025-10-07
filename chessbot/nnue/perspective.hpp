@@ -2,6 +2,8 @@
 
 #include "layer.hpp"
 
+#include <bitset>
+
 constexpr int acculumator_update_table_size = 64;
 
 
@@ -28,6 +30,16 @@ struct nnue_perspective_weights
         }
         for (size_t i = 0; i < NEURONS; i++) {
             biases[i] = data[index++];
+        }
+    }
+
+    void save(int16_t *data, size_t &index)
+    {
+        for (size_t i = 0; i < NEURONS*INPUTS; i++) {
+            data[index++] = weights[i];
+        }
+        for (size_t i = 0; i < NEURONS; i++) {
+            data[index++] = biases[i];
         }
     }
 
@@ -155,10 +167,7 @@ struct nnue_perspective
         int16_t *acc = (int16_t*)__builtin_assume_aligned(acculumator, 64);
         int16_t *bias = (int16_t*)__builtin_assume_aligned(weights->biases, 64);
 
-        for (int i = 0; i < NEURONS; i += 32) {
-            _mm256_store_si256((__m256i*)&acc[i], _mm256_load_si256((__m256i*)&bias[i]));
-            _mm256_store_si256((__m256i*)&acc[i+16], _mm256_load_si256((__m256i*)&bias[i+16]));
-        }
+        acculumator_copy(acc, bias);
 
         update_tables[update_table_index].clear(acculumator, true);
     }
@@ -166,17 +175,28 @@ struct nnue_perspective
 
     void acculumator_copy(int16_t *dst, int16_t *src)
     {
+        #if USE_AVX2
         for (int i = 0; i < NEURONS; i += 64) {
             _mm256_store_si256((__m256i*)&dst[i], _mm256_load_si256((__m256i*)&src[i]));
             _mm256_store_si256((__m256i*)&dst[i+16], _mm256_load_si256((__m256i*)&src[i+16]));
             _mm256_store_si256((__m256i*)&dst[i+32], _mm256_load_si256((__m256i*)&src[i+32]));
             _mm256_store_si256((__m256i*)&dst[i+48], _mm256_load_si256((__m256i*)&src[i+48]));
         }
+        #else
+        for (int i = 0; i < NEURONS; i += 32) {
+            _mm_store_si128((__m128i*)&dst[i], _mm_load_si128((__m128i*)&src[i]));
+            _mm_store_si128((__m128i*)&dst[i+8], _mm_load_si128((__m128i*)&src[i+8]));
+            _mm_store_si128((__m128i*)&dst[i+16], _mm_load_si128((__m128i*)&src[i+16]));
+            _mm_store_si128((__m128i*)&dst[i+24], _mm_load_si128((__m128i*)&src[i+24]));
+        }
+        #endif // USE_AVX2
     }
 
     void acculumator_add(int16_t *acc, int index)
     {
         int16_t *weight = &weights->weights[index*NEURONS];
+
+        #if USE_AVX2
 
         for (int i = 0; i < NEURONS; i += 32) {
             __m256i a0 = _mm256_load_si256((__m256i*)&acc[i]);
@@ -192,11 +212,32 @@ struct nnue_perspective
             _mm256_store_si256((__m256i*)&acc[i], a0);
             _mm256_store_si256((__m256i*)&acc[i+16], a1);
         }
+
+        #else
+
+        for (int i = 0; i < NEURONS; i += 16) {
+            __m128i a0 = _mm_load_si128((__m128i*)&acc[i]);
+            __m128i b0 = _mm_load_si128((__m128i*)&weight[i]);
+
+            __m128i a1 = _mm_load_si128((__m128i*)&acc[i+8]);
+            __m128i b1 = _mm_load_si128((__m128i*)&weight[i+8]);
+
+
+            a0 = _mm_add_epi16(a0, b0);
+            a1 = _mm_add_epi16(a1, b1);
+
+            _mm_store_si128((__m128i*)&acc[i], a0);
+            _mm_store_si128((__m128i*)&acc[i+8], a1);
+        }
+
+        #endif // USE_AVX2
     }
 
     void acculumator_sub(int16_t *acc, int index)
     {
         int16_t *weight = &weights->weights[index*NEURONS];
+
+        #if USE_AVX2
 
         for (int i = 0; i < NEURONS; i += 32) {
             __m256i a0 = _mm256_load_si256((__m256i*)&acc[i]);
@@ -212,12 +253,33 @@ struct nnue_perspective
             _mm256_store_si256((__m256i*)&acc[i], a0);
             _mm256_store_si256((__m256i*)&acc[i+16], a1);
         }
+
+        #else
+
+        for (int i = 0; i < NEURONS; i += 16) {
+            __m128i a0 = _mm_load_si128((__m128i*)&acc[i]);
+            __m128i b0 = _mm_load_si128((__m128i*)&weight[i]);
+
+            __m128i a1 = _mm_load_si128((__m128i*)&acc[i+8]);
+            __m128i b1 = _mm_load_si128((__m128i*)&weight[i+8]);
+
+
+            a0 = _mm_sub_epi16(a0, b0);
+            a1 = _mm_sub_epi16(a1, b1);
+
+            _mm_store_si128((__m128i*)&acc[i], a0);
+            _mm_store_si128((__m128i*)&acc[i+8], a1);
+        }
+
+        #endif
     }
 
     void acculumator_addsub(int16_t *acc, int add_index, int sub_index)
     {
         int16_t *add_weight = &weights->weights[add_index*NEURONS];
         int16_t *sub_weight = &weights->weights[sub_index*NEURONS];
+
+        #if USE_AVX2
 
         for (int i = 0; i < NEURONS; i += 32) {
             __m256i a0 = _mm256_load_si256((__m256i*)&acc[i]);
@@ -235,6 +297,27 @@ struct nnue_perspective
             _mm256_store_si256((__m256i*)&acc[i], a0);
             _mm256_store_si256((__m256i*)&acc[i+16], a1);
         }
+
+        #else
+
+        for (int i = 0; i < NEURONS; i += 16) {
+            __m128i a0 = _mm_load_si128((__m128i*)&acc[i]);
+            __m128i a1 = _mm_load_si128((__m128i*)&acc[i+8]);
+
+            __m128i sub0 = _mm_load_si128((__m128i*)&sub_weight[i]);
+            __m128i sub1 = _mm_load_si128((__m128i*)&sub_weight[i+8]);
+
+            __m128i add0 = _mm_load_si128((__m128i*)&add_weight[i]);
+            __m128i add1 = _mm_load_si128((__m128i*)&add_weight[i+8]);
+
+            a0 = _mm_add_epi16(_mm_sub_epi16(a0, sub0), add0);
+            a1 = _mm_add_epi16(_mm_sub_epi16(a1, sub1), add1);
+
+            _mm_store_si128((__m128i*)&acc[i], a0);
+            _mm_store_si128((__m128i*)&acc[i+8], a1);
+        }
+
+        #endif // USE_AVX2
     }
 
     void acculumator_addsubsub(int16_t *acc, int add_index, int sub_index0, int sub_index1)
@@ -242,6 +325,9 @@ struct nnue_perspective
         int16_t *add_weight = &weights->weights[add_index*NEURONS];
         int16_t *sub_weight0 = &weights->weights[sub_index0*NEURONS];
         int16_t *sub_weight1 = &weights->weights[sub_index1*NEURONS];
+
+
+        #if USE_AVX2
 
         for (int i = 0; i < NEURONS; i += 32) {
             __m256i a0 = _mm256_load_si256((__m256i*)&acc[i]);
@@ -262,6 +348,30 @@ struct nnue_perspective
             _mm256_store_si256((__m256i*)&acc[i], a0);
             _mm256_store_si256((__m256i*)&acc[i+16], a1);
         }
+
+        #else
+
+        for (int i = 0; i < NEURONS; i += 16) {
+            __m128i a0 = _mm_load_si128((__m128i*)&acc[i]);
+            __m128i a1 = _mm_load_si128((__m128i*)&acc[i+8]);
+
+            __m128i sub00 = _mm_load_si128((__m128i*)&sub_weight0[i]);
+            __m128i sub01 = _mm_load_si128((__m128i*)&sub_weight0[i+8]);
+
+            __m128i sub10 = _mm_load_si128((__m128i*)&sub_weight1[i]);
+            __m128i sub11 = _mm_load_si128((__m128i*)&sub_weight1[i+8]);
+
+            __m128i add0 = _mm_load_si128((__m128i*)&add_weight[i]);
+            __m128i add1 = _mm_load_si128((__m128i*)&add_weight[i+8]);
+
+            a0 = _mm_add_epi16(_mm_sub_epi16(_mm_sub_epi16(a0, sub00), sub10), add0);
+            a1 = _mm_add_epi16(_mm_sub_epi16(_mm_sub_epi16(a1, sub01), sub11), add1);
+
+            _mm_store_si128((__m128i*)&acc[i], a0);
+            _mm_store_si128((__m128i*)&acc[i+8], a1);
+        }
+
+        #endif
     }
 
 
@@ -329,6 +439,9 @@ struct nnue_perspective
 
         const __m128i idx_add = _mm_set1_epi16(16);
 
+
+        #if USE_AVX2
+
         const __m256i minv = _mm256_set1_epi16(0);
         const __m256i maxv = _mm256_set1_epi16(halfkp_quantization_fractions);
 
@@ -345,12 +458,12 @@ struct nnue_perspective
             __m128i ctl_lo = _mm_load_si128((__m128i*)&shuffle_lut[gt_lo*16]);
             __m128i ctl_hi = _mm_load_si128((__m128i*)&shuffle_lut[gt_hi*16]);
 
-            int k_lo = _mm_popcnt_u32(gt_lo);
-            int k_hi = _mm_popcnt_u32(gt_hi);
-
             __m256i act = _mm256_min_epi16(_mm256_max_epi16(acc, minv), maxv);
 
             _mm256_store_si256((__m256i*)&neuron[i], act);
+
+            int k_lo = _mm_popcnt_u32(gt_lo);
+            int k_hi = _mm_popcnt_u32(gt_hi);
 
             __m128i packed_idx_lo = _mm_shuffle_epi8(idx_lo, ctl_lo);
             __m128i packed_idx_hi = _mm_shuffle_epi8(idx_hi, ctl_hi);
@@ -363,6 +476,47 @@ struct nnue_perspective
             idx_lo = _mm_add_epi16(idx_lo, idx_add);
             idx_hi = _mm_add_epi16(idx_hi, idx_add);
         }
+
+        #else
+
+        const __m128i minv = _mm_set1_epi16(0);
+        const __m128i maxv = _mm_set1_epi16(halfkp_quantization_fractions);
+
+        for (int i = 0; i < NEURONS; i += 16) {
+            __m128i acc0 = _mm_load_si128((__m128i*)&accul[i]);
+            __m128i acc1 = _mm_load_si128((__m128i*)&accul[i+8]);
+
+            const __m128i z = _mm_setzero_si128();
+
+            uint32_t gt_lo = _mm_movemask_epi8(_mm_packs_epi16(_mm_cmpgt_epi16(acc0, z), z));
+            uint32_t gt_hi = _mm_movemask_epi8(_mm_packs_epi16(_mm_cmpgt_epi16(acc1, z), z));
+
+            __m128i ctl_lo = _mm_load_si128((__m128i*)&shuffle_lut[gt_lo*16]);
+            __m128i ctl_hi = _mm_load_si128((__m128i*)&shuffle_lut[gt_hi*16]);
+
+            __m128i act0 = _mm_min_epi16(_mm_max_epi16(acc0, minv), maxv);
+            __m128i act1 = _mm_min_epi16(_mm_max_epi16(acc1, minv), maxv);
+
+            _mm_store_si128((__m128i*)&neuron[i], act0);
+            _mm_store_si128((__m128i*)&neuron[i+8], act1);
+
+            int k_lo = _mm_popcnt_u32(gt_lo);
+            int k_hi = _mm_popcnt_u32(gt_hi);
+
+            __m128i packed_idx_lo = _mm_shuffle_epi8(idx_lo, ctl_lo);
+            __m128i packed_idx_hi = _mm_shuffle_epi8(idx_hi, ctl_hi);
+
+            _mm_storeu_si128((__m128i*)(outputs_idx + num_of_outputs), packed_idx_lo);
+            _mm_storeu_si128((__m128i*)(outputs_idx + num_of_outputs + k_lo), packed_idx_hi);
+
+            num_of_outputs += k_lo + k_hi;
+
+            idx_lo = _mm_add_epi16(idx_lo, idx_add);
+            idx_hi = _mm_add_epi16(idx_hi, idx_add);
+        }
+
+        #endif
+
 
         neurons[NEURONS] = 0;
         _mm_storeu_si128((__m128i*)(outputs_idx + num_of_outputs), _mm_set1_epi16(NEURONS));

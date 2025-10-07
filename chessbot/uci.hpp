@@ -87,32 +87,3 @@ private:
 
 std::vector<std::string> split_string(std::string str, char d);
 
-struct uci_engine
-{
-    ~uci_engine();
-    uci_engine();
-
-    void launch(std::string engine_path);
-
-    void set_option(std::string name, int value);
-
-    void new_game();
-    chess_move go_clock(const game_state &game, int wtime, int winc, int btime, int binc, int &depth_out, int &nodes_out, int &time_out);
-    void quit();
-
-    std::stringstream comm_log;
-
-private:
-    #ifdef __MINGW64__
-
-    HANDLE stdin_rd;
-    HANDLE stdin_wr;
-    HANDLE stdout_rd;
-    HANDLE stdout_wr;
-
-
-    std::string read_line(HANDLE stdout_rd);
-    void write_line(std::string line, HANDLE stdin_wr);
-
-    #endif
-};

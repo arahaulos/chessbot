@@ -389,9 +389,7 @@ struct move_picker
 
     int32_t previus_pick_score;
 
-
     int32_t good_quiet_treshold;
-
 private:
     int stage;
 

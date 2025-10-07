@@ -1,6 +1,6 @@
 CXX = g++
 
-CXXFLAGS = -Wall -Wextra -std=c++17 -O3 -s -m64 -march=native -mbmi2 -funroll-loops -mfma
+CXXFLAGS = -Wall -Wextra -std=c++17 -O3 -s -m64 -march=native -funroll-loops
 LDFLAGS = -static -static-libgcc -static-libstdc++
 
 ifeq ($(OS),Windows_NT)
@@ -10,7 +10,7 @@ else
 endif
 
 
-SRCS = $(wildcard *.cpp) $(wildcard chessbot/*.cpp) $(wildcard chessbot/nnue/*.cpp) $(wildcard chessbot/nnue/training/*.cpp)
+SRCS = $(wildcard *.cpp) $(wildcard chessbot/*.cpp) $(wildcard chessbot/nnue/*.cpp) $(wildcard chessbot/nnue/training/*.cpp) $(wildcard chessbot/util/*.cpp)
 OBJS = $(SRCS:.cpp=.o)
 
 BINARY_FILE = embedded_weights.nnue

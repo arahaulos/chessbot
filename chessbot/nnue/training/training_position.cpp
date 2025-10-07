@@ -1,7 +1,7 @@
 
 #include "training_position.hpp"
 #include "../../state.hpp"
-#include "../../tuning.hpp"
+#include "../../util/misc.hpp"
 
 
 void training_position::init(const board_state &state, float wdl, int32_t score)

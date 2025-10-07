@@ -10,74 +10,12 @@
 #include "training_perspective.hpp"
 #include "training_position.hpp"
 
-#include "network_defs.hpp"
+#include "../nnue_defs.hpp"
 
 class board_state;
 struct piece;
 struct square_index;
 enum player_type_t: unsigned char;
-
-
-inline int get_king_bucket(int king_sq)
-{
-    //return 0;
-
-    static const int buckets[64] = {
-    15, 15, 14, 14, 14, 14, 15, 15,
-    15, 15, 14, 14, 14, 14, 15, 15,
-    13, 13, 12, 12, 12, 12, 13, 13,
-    13, 13, 12, 12, 12, 12, 13, 13,
-    11, 11, 10, 10, 10, 10, 11, 11,
-    9,  9,  8,  8,  8,  8,  9,  9,
-    7,  6,  5,  4,  4,  5,  6,  7,
-    3,  2,  1,  0,  0,  1,  2,  3
-    };
-
-    return buckets[king_sq];
-}
-
-inline int encode_input_with_buckets(int type, int color, int sq_index, int king_sq)
-{
-    int king_bucket = get_king_bucket(king_sq);
-
-    if ((king_sq & 0x4) != 0) {
-        sq_index ^= 0x7;
-    }
-
-    int index = sq_index*12;
-    if (color == 0x8) {
-        index += 1;
-    }
-    index += (type-1)*2;
-    return index + king_bucket*12*64;
-}
-
-inline int encode_factorizer_input(int type, int color, int sq_index, int king_sq)
-{
-    int king_bucket = 16;
-
-    if ((king_sq & 0x4) != 0) {
-        sq_index ^= 0x7;
-    }
-
-    int index = sq_index*12;
-    if (color == 0x8) {
-        index += 1;
-    }
-    index += (type-1)*2;
-    return index + king_bucket*12*64;
-}
-
-inline int encode_output_bucket(uint64_t non_pawn_pieces)
-{
-    int b = pop_count(non_pawn_pieces) / 2;
-    if (b < 0) {
-        b = 0;
-    } else if (b >= output_buckets) {
-        b = output_buckets-1;
-    }
-    return b;
-}
 
 struct training_weights
 {
@@ -215,7 +153,6 @@ struct training_network
     training_layer<num_perspective_neurons*2, layer1_neurons, layer_stack_size, false> layer1;
     training_layer<layer1_neurons, layer2_neurons, layer_stack_size, false> layer2;
     training_layer<layer2_neurons, 1, layer_stack_size, true> output_layer;
-    //training_layer<layer2_neurons, 1, layer_stack_size, true> small_output_layer;
 
     std::shared_ptr<training_weights> weights;
 

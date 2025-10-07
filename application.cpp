@@ -2,10 +2,10 @@
 #include <iostream>
 #include <sstream>
 #include "application.hpp"
-#include "chessbot/tuning.hpp"
-#include "chessbot/pgn_parser.hpp"
 #include "chessbot/perft.hpp"
 #include "chessbot/search.hpp"
+
+#include "chessbot/util/datagen.hpp"
 
 
 application::application()
@@ -13,7 +13,6 @@ application::application()
     game = std::make_shared<game_state>();
 
     alphabeta = std::make_shared<alphabeta_search>();
-    alphabeta->use_opening_book = false;
 
     uci = std::make_shared<uci_interface>(alphabeta, game);
 
@@ -21,7 +20,7 @@ application::application()
 }
 
 
-void application::selfplay(std::string folder, std::string nnue_file, int threads, int depth, int nodes, bool random, int games_per_file, int max_files)
+void application::datagen(std::string folder, std::string nnue_file, int threads, int depth, int nodes, bool random, int games_per_file, int max_files)
 {
     int filenum = 0;
     while (filenum < max_files) {
@@ -37,7 +36,7 @@ void application::selfplay(std::string folder, std::string nnue_file, int thread
             file.close();
             continue;
         }
-        tuning_utility::selfplay(filename, nnue_file, threads, games_per_file, depth, nodes, random);
+        training_datagen::datagen(filename, nnue_file, threads, games_per_file, depth, nodes, random);
     }
 }
 
@@ -225,7 +224,9 @@ void application::run_benchmark()
     uint64_t total_nodes = 0;
     auto start_time = std::chrono::high_resolution_clock::now();
 
-    for (int i = 0; i < 5; i++) {
+    //alphabeta->load_nnue_net("optimized.nnue");
+
+    for (int i = 0; i < 3; i++) {
 
         total_nodes += bench_position("2rq1r1k/pp3ppp/3n4/n2p4/1Q6/2PBBP1P/P4P2/2KR2R1 w - - 0 19", 20);
 

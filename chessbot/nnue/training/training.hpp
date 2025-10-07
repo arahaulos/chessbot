@@ -13,4 +13,6 @@ struct nnue_trainer {
     static void quantize_net(std::string net_file, std::string qnet_file);
 
     static float find_scaling_factor_for_net(std::string qnet_file, std::vector<selfplay_result> &positions);
+
+    static void optimize_quantized_net(std::string input_file, std::string output_file, std::vector<selfplay_result> &test_set);
 };

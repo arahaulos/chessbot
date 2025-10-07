@@ -8,7 +8,6 @@ constexpr int32_t TT_MAX_EVAL = std::numeric_limits<int16_t>::max() - 512;
 constexpr int32_t TT_MIN_EVAL = -TT_MAX_EVAL;
 
 constexpr int EVAL_CACHE_ENTRIES_PER_BUCKET = 4;
-constexpr int EVAL_CACHE_COUNTER_DIV = 4;
 constexpr int TT_ENTRIES_IN_BUCKET = 4;
 
 inline int32_t score_to_tt(int32_t score, int ply)

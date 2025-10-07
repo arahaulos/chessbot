@@ -39,7 +39,6 @@ alphabeta_search::alphabeta_search()
     alphabeta_abort_flag = false;
 
     test_flag = true;
-    use_opening_book = true;
 
     current_cache_age = 0;
     limit_nodes = 0;
@@ -57,7 +56,6 @@ alphabeta_search::alphabeta_search(const alphabeta_search &other): transposition
     searching_flag = false;
     alphabeta_abort_flag = false;
     test_flag = other.test_flag;
-    use_opening_book = other.use_opening_book;
     current_cache_age = other.current_cache_age;
     limit_nodes = 0;
     num_of_pvs = other.num_of_pvs;
@@ -246,29 +244,7 @@ void alphabeta_search::iterative_search(int max_depth)
 
     std::vector<chess_move> legal_moves = state_to_search.get_all_legal_moves(state_to_search.get_turn());
 
-    chess_move book_move = book.get_book_move(state_to_search);
-
-    if ((book_move.valid() && use_opening_book) /*|| legal_moves.size() == 1*/) {
-        info_lock.lock();
-
-        search_info info;
-        info.depth = 1;
-        info.seldepth = 1;
-        info.nodes = 1;
-        info.time_ms = get_search_time_ms();
-        for (int i = 0; i < num_of_pvs; i++) {
-            info.lines.push_back(std::make_shared<pv_table>());
-        }
-        info.lines[0]->first((book_move.valid() ? book_move : legal_moves[0]));
-
-        search_infos.push_back(info);
-
-        info_lock.unlock();
-
-        ready_flag = true;
-
-        return;
-    } else if (legal_moves.size() == 0) {
+    if (legal_moves.size() == 0) {
         std::cout << "No legal moves!!" << std::endl;
         searching_flag = false;
         return;
@@ -295,8 +271,6 @@ void alphabeta_search::iterative_search(int max_depth)
 
         total_nodes_searched = all_threads_stats.nodes;
 
-        //std::cout << thread_datas[0]->nnue->total_active_neurons / (thread_datas[0]->nnue->total_evaluations+1) << std::endl;
-
         if (!searching_flag || (limit_nodes != 0 && all_threads_stats.nodes > limit_nodes && depth >= min_depth)) {
             break;
         } else {
@@ -311,11 +285,6 @@ void alphabeta_search::iterative_search(int max_depth)
     }
 
     ready_flag = true;
-
-   /* if (test_flag) {
-        //std::cout << all_threads_stats.avg_history_score / all_threads_stats.history_score_samples  << std::endl;
-        all_threads_stats.print_history_distribution();
-    }*/
 }
 
 void alphabeta_search::start_helper_threads(int32_t window_alpha, int32_t window_beta, int depth)
@@ -671,8 +640,7 @@ int32_t alphabeta_search::alphabeta(board_state &state, int32_t alpha, int32_t b
         eval_cache.prefetch(next_hash);
         transposition_table.prefetch(next_hash);
 
-        int nmp_reduction = 3 + std::clamp((eval - beta) / 100, 0, 4) + (depth / 3);
-
+        int nmp_reduction = 3 + std::min((eval - beta) / 100, 4) + (depth / 3);
         int nmp_depth = std::max(depth - nmp_reduction, 0);
 
         sc.moves[ply] = chess_move::null_move();
@@ -681,29 +649,28 @@ int32_t alphabeta_search::alphabeta(board_state &state, int32_t alpha, int32_t b
 
         unmake_restore restore = state.make_null_move();
 
+        //Searching as cut node is not correct, but some reason (probably because RFP is limited to cut nodes), it is stronger
         int32_t null_score = -alphabeta(state, -beta, 1-beta, nmp_depth, ply+1, sc, line, nullptr, CUT_NODE);
 
         state.unmake_null_move(restore);
 
         if (null_score >= beta) {
-            if (depth > 8) {
-                //NMP vertification search
-                int restore_min_nmp_ply = sc.min_nmp_ply;
-                int restore_prior_reduction = sc.reduction[ply-1];
-
-                sc.min_nmp_ply = ply + ((nmp_depth * 3) / 4) + 1;
-
-                int32_t score = alphabeta(state, beta-1, beta, nmp_depth, ply, sc, line, nullptr, ALL_NODE);
-
-                sc.min_nmp_ply = restore_min_nmp_ply;
-                sc.reduction[ply-1] = restore_prior_reduction;
-
-                if (score >= beta) {
-                    return std::min(null_score, score);
-                }
-            } else {
-                //If null move search returns mate score, return beta because line where mate score is found is not legal
+            if (depth < 9) {
                 return (is_mate_score(null_score) ? beta : null_score);
+            }
+            //NMP vertification search
+            int restore_min_nmp_ply = sc.min_nmp_ply;
+            int restore_prior_reduction = sc.reduction[ply-1];
+
+            sc.min_nmp_ply = ply + ((nmp_depth * 3) / 4) + 1;
+
+            int32_t score = alphabeta(state, beta-1, beta, nmp_depth, ply, sc, line, nullptr, ALL_NODE);
+
+            sc.min_nmp_ply = restore_min_nmp_ply;
+            sc.reduction[ply-1] = restore_prior_reduction;
+
+            if (score >= beta) {
+                return std::min(null_score, score);
             }
         }
     }
@@ -778,8 +745,6 @@ int32_t alphabeta_search::alphabeta(board_state &state, int32_t alpha, int32_t b
             }
         }
     }
-
-
 
     //Singular search
     //When tt entry is found which is marked as cut or pv node, reduced search is performed to check if there is alternative good moves

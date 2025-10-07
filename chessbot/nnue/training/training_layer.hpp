@@ -5,7 +5,7 @@
 #include <x86gprintrin.h>
 #include <x86intrin.h>
 
-#include "network_defs.hpp"
+#include "../nnue_defs.hpp"
 
 
 template<typename T>
@@ -29,9 +29,19 @@ inline void copy_vectorized(float *ov, const float *av, int tid, int tc)
     int per_thread = N / tc;
     int start = per_thread * tid;
 
+    #if USE_AVX2
+
     for (int i = start; i < start + per_thread; i += 8) {
         _mm256_store_ps(&ov[i], _mm256_load_ps(&av[i]));
     }
+
+    #else
+
+    for (int i = start; i < start + per_thread; i++) {
+        ov[i] = av[i];
+    }
+
+    #endif
 }
 
 template <int N>
@@ -47,12 +57,22 @@ inline void add_vectorized(float *ov, const float *av, const float *bv, int tid,
     int per_thread = N / tc;
     int start = per_thread * tid;
 
+    #if USE_AVX2
+
     for (int i = start; i < start + per_thread; i += 8) {
         __m256 a = _mm256_load_ps(&av[i]);
         __m256 b = _mm256_load_ps(&bv[i]);
         __m256 o = _mm256_add_ps(a, b);
         _mm256_store_ps(&ov[i], o);
     }
+
+    #else
+
+    for (int i = start; i < start + per_thread; i++) {
+        ov[i] = av[i] + bv[i];
+    }
+
+    #endif
 }
 
 template <int N>
@@ -69,12 +89,23 @@ inline void mult_vectorized(float *ov, const float *av, const float *bv, int tid
     int per_thread = N / tc;
     int start = per_thread * tid;
 
+    #if USE_AVX2
+
     for (int i = start; i < start + per_thread; i += 8) {
         __m256 a = _mm256_load_ps(&av[i]);
         __m256 b = _mm256_load_ps(&bv[i]);
         __m256 o = _mm256_mul_ps(a, b);
         _mm256_store_ps(&ov[i], o);
     }
+
+    #else
+
+
+    for (int i = start; i < start + per_thread; i++) {
+        ov[i] = av[i]*bv[i];
+    }
+
+    #endif
 }
 
 
@@ -92,6 +123,8 @@ inline void mult_vectorized(float *ov, const float *av, float value, int tid, in
     int per_thread = N / tc;
     int start = per_thread * tid;
 
+    #if USE_AVX2
+
     __m256 b = _mm256_set1_ps(value);
 
     for (int i = start; i < start + per_thread; i += 8) {
@@ -99,6 +132,14 @@ inline void mult_vectorized(float *ov, const float *av, float value, int tid, in
         __m256 o = _mm256_mul_ps(a, b);
         _mm256_store_ps(&ov[i], o);
     }
+
+    #else
+
+    for (int i = start; i < start + per_thread; i++) {
+        ov[i] = av[i]*value;
+    }
+
+    #endif
 }
 
 
@@ -116,11 +157,21 @@ inline void set_vectorized(float *ov, float value, int tid, int tc)
     int per_thread = N / tc;
     int start = per_thread * tid;
 
+    #if USE_AVX2
+
     __m256 v = _mm256_set1_ps(value);
 
     for (int i = start; i < start + per_thread; i += 8) {
         _mm256_store_ps(&ov[i], v);
     }
+
+    #else
+
+    for (int i = start; i < start + per_thread; i++) {
+        ov[i] = value;
+    }
+
+    #endif
 }
 
 
@@ -138,6 +189,8 @@ inline void ema_vectorized(float *ov, float *av, float val, int tid, int tc)
     int per_thread = N / tc;
     int start = per_thread * tid;
 
+    #if USE_AVX2
+
     __m256 f0 = _mm256_set1_ps(val);
     __m256 f1 = _mm256_set1_ps(1.0f - val);
 
@@ -150,7 +203,18 @@ inline void ema_vectorized(float *ov, float *av, float val, int tid, int tc)
 
         _mm256_store_ps(&ov[i], _mm256_add_ps(a, b));
     }
+
+    #else
+
+    for (int i = start; i < start + per_thread; i++) {
+        ov[i] = (ov[i] * val) + (av[i] * (1.0f - val));
+    }
+
+    #endif
 }
+
+
+#if USE_AVX2
 
 inline __m256 inv_sqrt_plus_eps(__m256 v, float eps) {
     const __m256 one = _mm256_set1_ps(1.0f);
@@ -171,6 +235,8 @@ inline __m256 inv_sqrt_plus_eps(__m256 v, float eps) {
 
     return denom_inv;
 }
+
+#endif
 
 
 inline float sigmoid(float x)
@@ -346,6 +412,11 @@ struct training_layer_weights
 
     void rmsprop(training_layer_weights<INPUTS, NEURONS, STACK_SIZE, IS_OUTPUT_LAYER> *grad, training_layer_weights<INPUTS, NEURONS, STACK_SIZE, IS_OUTPUT_LAYER> *pg, float learning_rate, int tid, int tc)
     {
+        float epsilon = 0.0000001f;
+
+        #if USE_AVX2
+
+
         float clamp_min = layer_quantization_clamp_min;
         float clamp_max = layer_quantization_clamp_max;
         if (IS_OUTPUT_LAYER) {
@@ -357,8 +428,6 @@ struct training_layer_weights
         __m256 cmax = _mm256_set1_ps(clamp_max);
 
         __m256 lr = _mm256_set1_ps(learning_rate);
-
-        float epsilon = 0.0000001f;
 
         int per_thread = INPUTS*NEURONS*STACK_SIZE / tc;
         int start = per_thread*tid;
@@ -397,6 +466,22 @@ struct training_layer_weights
                 _mm256_store_ps(&biases[i], nb);
             }
         }
+
+        #else
+
+        int per_thread = INPUTS*NEURONS / tc;
+        int start = per_thread*tid;
+
+        for (int i = start; i < start + per_thread; i++) {
+            weights[i] -= grad->weights[i]*learning_rate / sqrt(pg->weights[i] + epsilon);
+        }
+        if (tid == 0) {
+            for (int i = 0; i < NEURONS; i++) {
+                biases[i] -= grad->biases[i]*learning_rate / sqrt(pg->biases[i] + epsilon);
+            }
+        }
+
+        #endif
     }
 
 
@@ -439,6 +524,9 @@ struct training_layer
 
 
     void update(int neuron, int bucket, float *prev_layer) {
+
+        #if USE_AVX2
+
         __m256 n = _mm256_set1_ps(0.0f);
 
         for (int j = 0; j < IN; j += 8) {
@@ -466,6 +554,15 @@ struct training_layer
 
         acculumator[neuron] = data.f[0] + data.f[1] + data.f[2] + data.f[3] + weights->biases[OUT*bucket + neuron];
 
+        #else
+
+        acculumator[neuron] = 0;
+        for (int i = 0; i < IN; i++) {
+            acculumator[neuron] += prev_layer[i]*weights->weights[IN*OUT*bucket + neuron*IN + i];
+        }
+
+        #endif
+
         if (IS_OUTPUT_LAYER) {
             neurons[neuron] = activation_func_out(acculumator[neuron]);
         } else {
@@ -474,6 +571,9 @@ struct training_layer
     }
 
     void update(int neuron, int bucket, float *prev_layer0, float *prev_layer1) {
+
+        #if USE_AVX2
+
         __m256 n = _mm256_set1_ps(0.0f);
 
         for (int j = 0; j < IN/2; j += 8) {
@@ -508,6 +608,20 @@ struct training_layer
 
         acculumator[neuron] = data.f[0] + data.f[1] + data.f[2] + data.f[3] + weights->biases[OUT*bucket + neuron];
 
+        #else
+
+        acculumator[neuron] = 0;
+        for (int i = 0; i < IN/2; i++) {
+            acculumator[neuron] += weights->weights[IN*OUT*bucket + neuron*IN + i]*prev_layer0[i];
+        }
+
+        acculumator[neuron] = 0;
+        for (int i = 0; i < IN/2; i++) {
+            acculumator[neuron] += weights->weights[IN*OUT*bucket + neuron*IN + i + (IN/2)]*prev_layer0[i];
+        }
+
+        #endif
+
         if (IS_OUTPUT_LAYER) {
             neurons[neuron] = activation_func_out(acculumator[neuron]);
         } else {
@@ -533,6 +647,9 @@ struct training_layer
             prev_layer_grads0[i] = 0;
             prev_layer_grads1[i] = 0;
         }
+
+        #if USE_AVX2
+
 
         for (int i = 0; i < OUT; i++) {
             //float a = neurons[i]; //Activvation
@@ -572,6 +689,35 @@ struct training_layer
 
             gradients->biases[OUT*bucket + i] += dc*da;
         }
+
+        #else
+
+
+        for (int i = 0; i < OUT; i++) {
+            float x = acculumator[i];
+            float dc = grads[i];
+            float da = (IS_OUTPUT_LAYER ? activation_diff_out(x) : activation_diff(x));
+
+            for (int j = 0; j < IN/2; j++) {
+                float w = weights->weights[IN*OUT*bucket + i*IN + j];
+                float l0 = prev_layer_activations0[j];
+
+                prev_layer_grads0[j] += w*dc*da;
+                gradients->weights[IN*OUT*bucket + i*IN + j] += dc*da*l0;
+            }
+            for (int j = 0; j < IN/2; j++) {
+                float w = weights->weights[IN*OUT*bucket + i*IN + j + IN/2];
+                float l0 = prev_layer_activations1[j];
+
+                prev_layer_grads1[j] += w*dc*da;
+                gradients->weights[IN*OUT*bucket + i*IN + j + IN/2] += dc*da*l0;
+            }
+
+            gradients->biases[OUT*bucket + i] += dc*da;
+        }
+
+
+        #endif
     }
 
     void back_propagate(int bucket, training_layer_weights<IN,OUT, STACK_SIZE,IS_OUTPUT_LAYER> *gradients, float *prev_layer_grads, float *prev_layer_activations) {
@@ -579,6 +725,8 @@ struct training_layer
         for (int i = 0; i < IN; i++) {
             prev_layer_grads[i] = 0;
         }
+
+        #if USE_AVX2
 
         for (int i = 0; i < OUT; i++) {
             //float a = neurons[i]; //Activvation
@@ -603,6 +751,29 @@ struct training_layer
 
             gradients->biases[OUT*bucket + i] += dc*da;
         }
+
+        #else
+
+        for (int i = 0; i < OUT; i++) {
+            //float a = neurons[i]; //Activvation
+            float x = acculumator[i]; //Neurons input
+            float dc = grads[i]; //cost diff
+            float da = (IS_OUTPUT_LAYER ? activation_diff_out(x) : activation_diff(x)); //activation diff
+
+
+            for (int j = 0; j < IN; j++) {
+                float w = weights->weights[IN*OUT*bucket + i*IN + j];
+                float l0 = prev_layer_activations[j];
+
+                prev_layer_grads[j] += w*dc*da;
+                gradients->weights[IN*OUT*bucket + i*IN + j] += dc*da*l0;
+            }
+
+            gradients->biases[OUT*bucket + i] += dc*da;
+        }
+
+
+        #endif
     }
 
     float *neurons;

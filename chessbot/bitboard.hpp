@@ -4,6 +4,11 @@
 #include <x86gprintrin.h>
 #include <x86intrin.h>
 
+#if defined(__BMI2__)
+    #define USE_PEXT 1
+#else
+    #define USE_PEXT 0
+#endif
 
 typedef uint64_t bitboard;
 
@@ -28,15 +33,22 @@ inline int32_t pop_count(uint64_t u64) {
     return (int32_t)_mm_popcnt_u64(u64);//__builtin_popcountll(u64);
 }
 
+struct sliding_piece_pattern
+{
+    uint64_t pattern;
+    uint32_t offset;
+
+    #if !USE_PEXT
+
+    uint64_t magic;
+    uint8_t shift;
+
+    #endif // USE_PEXT
+};
+
 
 struct bitboard_utility {
-    uint32_t bishop_lookup_offset[64];
-    uint32_t rook_lookup_offset[64];
-
     int distance_to_edge_table[64][8];
-
-    bitboard bishop_pattern0[64];
-    bitboard rook_pattern0[64];
 
     bitboard king_pattern[64];
     bitboard knight_pattern[64];
@@ -45,20 +57,15 @@ struct bitboard_utility {
     bitboard pawn_advance_pattern[64][2];
     uint8_t pawn_block_square[64][2];
 
+    sliding_piece_pattern bishop_pattern[64];
+    sliding_piece_pattern rook_pattern[64];
+
     bitboard bishop_lookup[4096*64];
     bitboard rook_lookup[4096*64];
 
     bitboard bishop_xray_lookup[4096*64];
     bitboard rook_xray_lookup[4096*64];
 
-    bitboard bitboard_files[8];
-    bitboard bitboard_ranks[8];
-    bitboard bitboard_neighbor_files[8];
-
-    bitboard passed_pawn_mask[64][2];
-
-    bitboard center_board_mask;
-    bitboard extended_center_board_mask;
 
     bitboard_utility();
 
@@ -83,13 +90,40 @@ struct bitboard_utility {
 
 
     inline bitboard rook_attack(uint_fast8_t square_index, const bitboard &occupation, const bitboard &mask) {
-        uint64_t pattern = rook_pattern0[square_index];
-        return (rook_lookup[rook_lookup_offset[square_index] + _pext_u64(occupation, pattern)] & mask);
+        #if USE_PEXT
+        uint64_t pattern = rook_pattern[square_index].pattern;
+        uint32_t offset = rook_pattern[square_index].offset;
+        return (rook_lookup[offset + _pext_u64(occupation, pattern)] & mask);
+        #else
+        uint64_t pattern = rook_pattern[square_index].pattern;
+        uint32_t offset = rook_pattern[square_index].offset;
+
+        uint64_t magic = rook_pattern[square_index].magic;
+        uint8_t shift = rook_pattern[square_index].shift;
+
+        return (rook_lookup[offset + ((occupation & pattern)*magic >> shift)] & mask);
+        #endif
     }
 
     inline bitboard bishop_attack(uint_fast8_t square_index, const bitboard &occupation, const bitboard &mask) {
-        uint64_t pattern = bishop_pattern0[square_index];
-        return (bishop_lookup[bishop_lookup_offset[square_index] + _pext_u64(occupation, pattern)] & mask);
+        #if USE_PEXT
+
+        uint64_t pattern = bishop_pattern[square_index].pattern;
+        uint32_t offset = bishop_pattern[square_index].offset;
+
+        return (bishop_lookup[offset + _pext_u64(occupation, pattern)] & mask);
+
+        #else
+
+        uint64_t pattern = bishop_pattern[square_index].pattern;
+        uint32_t offset = bishop_pattern[square_index].offset;
+
+        uint64_t magic = bishop_pattern[square_index].magic;
+        uint8_t shift = bishop_pattern[square_index].shift;
+
+        return (bishop_lookup[offset + ((occupation & pattern)*magic >> shift)] & mask);
+
+        #endif
     }
 
     inline bitboard queen_attack(uint_fast8_t square_index, const bitboard &occupation, const bitboard &mask) {
@@ -119,28 +153,42 @@ struct bitboard_utility {
     }
 
 
-    inline bitboard get_file(uint_fast8_t square_index) {
-        return bitboard_files[square_index % 8];
-    }
-
-    inline bitboard get_neighbor_file(uint_fast8_t square_index) {
-        return bitboard_neighbor_files[square_index % 8];
-    }
-
-    inline bitboard get_rank(uint_fast8_t square_index) {
-        return bitboard_ranks[square_index / 8];
-    }
-
-
-
     inline bitboard rook_xray_attack(uint_fast8_t square_index, const bitboard &occupation, const bitboard &mask) {
-        uint64_t pattern = rook_pattern0[square_index];
-        return (rook_xray_lookup[rook_lookup_offset[square_index] + _pext_u64 (occupation, pattern)] & mask);
+        #if USE_PEXT
+        uint64_t pattern = rook_pattern[square_index].pattern;
+        uint32_t offset = rook_pattern[square_index].offset;
+
+        return (rook_xray_lookup[offset + _pext_u64(occupation, pattern)] & mask);
+        #else
+        uint64_t pattern = rook_pattern[square_index].pattern;
+        uint32_t offset = rook_pattern[square_index].offset;
+
+        uint64_t magic = rook_pattern[square_index].magic;
+        uint8_t shift = rook_pattern[square_index].shift;
+
+        return (rook_xray_lookup[offset + ((occupation & pattern)*magic >> shift)] & mask);
+        #endif
     }
 
     inline bitboard bishop_xray_attack(uint_fast8_t square_index, const bitboard &occupation, const bitboard &mask) {
-        uint64_t pattern = bishop_pattern0[square_index];
-        return (bishop_xray_lookup[bishop_lookup_offset[square_index] + _pext_u64 (occupation, pattern)] & mask);
+        #if USE_PEXT
+
+        uint64_t pattern = bishop_pattern[square_index].pattern;
+        uint32_t offset = bishop_pattern[square_index].offset;
+
+        return (bishop_xray_lookup[offset + _pext_u64(occupation, pattern)] & mask);
+
+        #else
+
+        uint64_t pattern = bishop_pattern[square_index].pattern;
+        uint32_t offset = bishop_pattern[square_index].offset;
+
+        uint64_t magic = bishop_pattern[square_index].magic;
+        uint8_t shift = bishop_pattern[square_index].shift;
+
+        return (bishop_xray_lookup[offset + ((occupation & pattern)*magic >> shift)] & mask);
+
+        #endif
     }
 
     inline bitboard queen_xray_attack(uint_fast8_t square_index, const bitboard &occupation, const bitboard &mask) {

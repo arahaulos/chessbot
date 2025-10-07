@@ -32,6 +32,7 @@ struct nnue_weights
     int rescale_factor1;
 
     void load(std::string path);
+    void save(std::string path);
 };
 
 struct nnue_board_state
@@ -118,6 +119,15 @@ struct nnue_network
         white_side.pop_acculumator();
 
         current_state -= 1;
+    }
+
+    int16_t *get_perspective_activations(player_type_t stm)
+    {
+        if (stm == WHITE) {
+            return white_side.neurons;
+        } else {
+            return black_side.neurons;
+        }
     }
 
     std::shared_ptr<nnue_weights> weights;
