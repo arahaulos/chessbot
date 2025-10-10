@@ -12,7 +12,7 @@ void global_init()
 
 void print_info()
 {
-    std::cout << "Version: " << __DATE__ << "   " << (USE_AVX2 ? "AVX2" : "SSE4.1") << " " << (USE_PEXT ? "PEXT" : "POPCNT") << std::endl;
+    std::cout << "Version: " << __DATE__ << "   " << (USE_AVX2 ? "AVX2" : "SSE4.1") << " " << (USE_PEXT ? "BMI2" : "POPCNT") << std::endl;
 }
 
 
@@ -28,7 +28,7 @@ int main()
 
     //training_data_utility::convert_training_data({"tuning/selfplays_nnue21"}, "tuning/data16", 1024);
 
-    //nnue_trainer::train("netkb16_512x2-(16-32-1)x8.nnue", "qnetkb16_512x2-(16-32-1)x8.nnue", {/*"tuning/data8", "tuning/data9", "tuning/data10", "tuning/data11", "tuning/data12", "tuning/data13", "tuning/data14",*/ "tuning/data15", "tuning/data16"});
+    //nnue_trainer::train("netkb16_512x2-(16-32-1)x8.nnue", "qnetkb16_512x2-(16-32-1)x8.nnue", {"tuning/data8", "tuning/data9", "tuning/data10", "tuning/data11", "tuning/data12", "tuning/data13", "tuning/data14", "tuning/data15", "tuning/data16"});
 
     /*tuning_utility::tune_search_params(1000, 25, 16, 100000, "search_tuning.txt", {"rfmargin_mult", "rfmargin_improving_modifier",
                                                                                    "fmargin_mult", "fmargin_base",
@@ -38,8 +38,8 @@ int main()
     /*std::unique_ptr<alphabeta_search> bot0 = std::make_unique<alphabeta_search>();
     std::unique_ptr<alphabeta_search> bot1 = std::make_unique<alphabeta_search>();
 
-    //bot0->load_nnue_net("qnetkb16_512x2-(16-32-1)x8.nnue");
-    //bot1->load_nnue_net("embedded_weights.nnue");
+    bot0->load_nnue_net("qnetkb16_512x2-(16-32-1)x8.nnue");
+    bot1->load_nnue_net("embedded_weights.nnue");
     bot0->set_threads(1);
     bot1->set_threads(1);
     bot0->test_flag = true;

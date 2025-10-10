@@ -17,10 +17,11 @@ uint64_t deposit_bits(uint64_t bits, uint64_t pattern)
     return result;
 }
 
-uint64_t find_magic(const uint64_t &pattern, int bits)
+uint64_t find_magic(const uint64_t &pattern)
 {
     static uint64_t rand = 123456789123456789;
 
+    int bits = pop_count(pattern);
     int lookups = std::pow(2, bits);
 
     uint64_t occ[4096];
@@ -186,7 +187,7 @@ void bitboard_utility::init_bishop_lookup()
 
         #if !USE_PEXT
 
-        bishop_pattern[i].magic = find_magic(pattern, bits);
+        bishop_pattern[i].magic = find_magic(pattern);
         bishop_pattern[i].shift = 64 - bits;
 
         #endif
@@ -223,7 +224,7 @@ void bitboard_utility::init_rook_lookup()
 
         #if !USE_PEXT
 
-        rook_pattern[i].magic = find_magic(pattern, bits);
+        rook_pattern[i].magic = find_magic(pattern);
         rook_pattern[i].shift = 64 - bits;
 
         #endif
@@ -402,15 +403,15 @@ bitboard_utility::bitboard_utility() {
     init_bishop_lookup();
     init_rook_lookup();
 
-    std::cout << "done." << std::endl;
+    std::cout << "done.\nSliding piece implementation: ";
 
     #if USE_PEXT
 
-    std::cout << "Using PEXT bitboards" << std::endl;
+    std::cout << "pext" << std::endl;
 
     #else
 
-    std::cout << "Using magic bitboards" << std::endl;
+    std::cout << "magic" << std::endl;
 
     #endif // PEXT
 }

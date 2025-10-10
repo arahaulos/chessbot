@@ -156,7 +156,7 @@ struct history_heurestic_table
     {
         int index = 0;
 
-        chess_move previous_move = move_stack[ply-1];
+        chess_move previous_move = (ply > 0 ? move_stack[ply-1] : chess_move::null_move());
 
         if (previous_move != chess_move::null_move()) {
             buffer[index++] = counter_moves[previous_move.get_moving_piece().d][previous_move.to.index];

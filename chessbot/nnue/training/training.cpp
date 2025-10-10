@@ -216,12 +216,12 @@ struct worker_thread
                 corrected_first_moment->mult(*first_moment, 1.0f / (1.0f - std::pow(beta1, step)), thread_id, pool_size);
                 corrected_second_moment->mult(*second_moment, 1.0f / (1.0f - std::pow(beta2, step)), thread_id, pool_size);
             } else if (operation == WORK_RMSPROP) {
-                net.weights->output_weights.rmsprop(&corrected_first_moment->output_weights, &corrected_second_moment->output_weights, learning_rate, thread_id, pool_size);
+                net.weights->output_weights.rmsprop(&corrected_first_moment->output_weights, &corrected_second_moment->output_weights, learning_rate, weight_decay, thread_id, pool_size);
 
-                net.weights->layer2_weights.rmsprop(&corrected_first_moment->layer2_weights, &corrected_second_moment->layer2_weights, learning_rate, thread_id, pool_size);
-                net.weights->layer1_weights.rmsprop(&corrected_first_moment->layer1_weights, &corrected_second_moment->layer1_weights, learning_rate, thread_id, pool_size);
+                net.weights->layer2_weights.rmsprop(&corrected_first_moment->layer2_weights, &corrected_second_moment->layer2_weights, learning_rate, weight_decay, thread_id, pool_size);
+                net.weights->layer1_weights.rmsprop(&corrected_first_moment->layer1_weights, &corrected_second_moment->layer1_weights, learning_rate, weight_decay, thread_id, pool_size);
 
-                net.weights->perspective_weights.rmsprop(&corrected_first_moment->perspective_weights, &corrected_second_moment->perspective_weights, learning_rate, thread_id, pool_size);
+                net.weights->perspective_weights.rmsprop(&corrected_first_moment->perspective_weights, &corrected_second_moment->perspective_weights, learning_rate, weight_decay, thread_id, pool_size);
             }
 
             thread_signal_ready();
@@ -253,10 +253,11 @@ struct worker_thread
         begin_signal.signal();
     }
 
-    void start_rmsprop(float lr)
+    void start_rmsprop(float lr, float wd)
     {
         operation = WORK_RMSPROP;
         learning_rate = lr;
+        weight_decay = wd;
         begin_signal.signal();
     }
 
@@ -274,6 +275,7 @@ private:
     std::vector<training_weights*> grads_to_add;
 
     float learning_rate;
+    float weight_decay;
     float beta1;
     float beta2;
 
@@ -341,7 +343,7 @@ struct worker_thread_pool
     }
 
 
-    void step(training_position *batch, int batch_size, float min_lambda, float max_lambda, bool use_factorizer, float beta1, float beta2, float learning_rate, float &avg_cost)
+    void step(training_position *batch, int batch_size, float min_lambda, float max_lambda, bool use_factorizer, float beta1, float beta2, float learning_rate, float weight_decay, float &avg_cost)
     {
         steps++;
 
@@ -360,7 +362,7 @@ struct worker_thread_pool
         std::for_each(threads.begin(), threads.end(), [grads_to_add, beta1, beta2, this] (auto p) {p->start_grad_calc(grads_to_add, beta1, beta2, steps);});
         std::for_each(threads.begin(), threads.end(), [] (auto p) {p->wait();});
 
-        std::for_each(threads.begin(), threads.end(), [learning_rate] (auto p) {p->start_rmsprop(learning_rate);});
+        std::for_each(threads.begin(), threads.end(), [learning_rate, weight_decay] (auto p) {p->start_rmsprop(learning_rate, weight_decay);});
         std::for_each(threads.begin(), threads.end(), [] (auto p) {p->wait();});
     }
 
@@ -607,7 +609,8 @@ void training_loop(std::string net_file, std::string qnet_file, std::shared_ptr<
     worker_thread_pool thread_pool(16, weights, gradient, gradient_sq, first_moment, second_moment, corrected_first_moment, corrected_second_moment);
 
     bool use_factorized = true;
-    float learning_rate = 0.0001f;
+    float learning_rate = 0.0004f;
+    float weight_decay = 0.001f;
     float beta1 = 0.9f;
     float beta2 = 0.999f;
     int batch_size = 4000*thread_pool.get_pool_size();
@@ -632,6 +635,7 @@ void training_loop(std::string net_file, std::string qnet_file, std::shared_ptr<
     std::cout << "Beta2: " << beta2 << std::endl;
     std::cout << "Learning rate: " << learning_rate << std::endl;
     std::cout << "Learning rate decay: " << learning_rate_decay << std::endl;
+    std::cout << "Weight decay: " << weight_decay << std::endl;
     std::cout << "Min lambda: " << min_lambda << std::endl;
     std::cout << "Max lambda: " << max_lambda << std::endl;
     std::cout << "Batch size: " << batch_size << std::endl;
@@ -661,7 +665,7 @@ void training_loop(std::string net_file, std::string qnet_file, std::shared_ptr<
         }
 
 
-        thread_pool.step(batch_manager.get_current_batch(), batch_size, min_lambda, max_lambda, use_factorized, beta1, beta2, learning_rate, batch_cost);
+        thread_pool.step(batch_manager.get_current_batch(), batch_size, min_lambda, max_lambda, use_factorized, beta1, beta2, learning_rate, weight_decay, batch_cost);
 
         if (training_cost == 0.0f) {
             training_cost = batch_cost;
@@ -688,6 +692,8 @@ void nnue_trainer::train(std::string net_file, std::string qnet_file, std::vecto
 
     init_weights(*weights, true);
     weights->load_file(net_file);
+
+    //init_weights(*weights, false);
 
     visualize_net("vis", *weights);
 

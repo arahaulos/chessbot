@@ -393,7 +393,6 @@ void alphabeta_search::search_root(int32_t window_alpha, int32_t window_beta, in
     sc.stats.reset();
     sc.history.test_flag = test_flag;
     sc.static_eval[0] = static_evaluation(sc.state, sc.state.get_turn(), sc.stats);
-    sc.reduction[0] = 0;
     sc.main_thread = (thread_id == 0);
 
     pv_table root_pv[MAX_MULTI_PV];
@@ -402,6 +401,7 @@ void alphabeta_search::search_root(int32_t window_alpha, int32_t window_beta, in
     for (auto it = root_moves.begin(); it != root_moves.end(); it++) {
         chess_move root_move = it->first;
 
+        sc.reduction[0] = 0;
         sc.moves[0] = root_move;
         sc.conthist[0] = sc.history.get_continuation_history_table(root_move);
         sc.stats.nodes += 1;
@@ -496,6 +496,7 @@ int32_t alphabeta_search::static_evaluation(const board_state &state, player_typ
         eval_cache[state.zhash].store(state.zhash, score);
     }
     return score;
+
 }
 
 int32_t alphabeta_search::alphabeta(board_state &state, int32_t alpha, int32_t beta, int depth, int ply, search_context &sc, pv_table &pv, chess_move *skip_move, node_type_t expected_node_type)
@@ -1107,13 +1108,14 @@ int32_t alphabeta_search::quisearch(board_state &state, int32_t alpha, int32_t b
         //Moves are ordered with SEE. Moves which have negative see are pruned
         bool tt_move_found = false;
         for (int i = 0; i < num_of_moves; i++) {
-            if (movelist[i] == tt_move) {
+            chess_move mov = movelist[i];
+            if (mov == tt_move) {
                 tt_move_found = true;
-                moves.add(movelist[i], 32000);
+                moves.add(mov, 32000);
             } else {
-                int32_t see = static_exchange_evaluation(state, movelist[i]);
+                int32_t see = static_exchange_evaluation(state, mov);
                 if (see >= 0) {
-                    moves.add(movelist[i], see);
+                    moves.add(mov, see);
                 }
             }
         }
@@ -1135,9 +1137,7 @@ int32_t alphabeta_search::quisearch(board_state &state, int32_t alpha, int32_t b
     }
 
     chess_move mov;
-    int32_t see;
-
-    while (moves.pick(mov, see)) {
+    while (moves.pick(mov)) {
         if (state.causes_check(mov, state.get_turn())) {
             continue;
         }
@@ -1176,7 +1176,7 @@ int32_t alphabeta_search::quisearch(board_state &state, int32_t alpha, int32_t b
 
     //Only store node to TT if we found move which increased evaluation
     if (is_score_valid(best_score) && best_move.valid()) {
-        if (node_type == ALL_NODE && tt_hit) { //Only possible in check
+        if (node_type == ALL_NODE && tt_hit) {
             best_move = tt_move;
         }
         transposition_table[state.zhash].store(state.zhash, best_move, 0, node_type, best_score, raw_eval, ply, current_cache_age);

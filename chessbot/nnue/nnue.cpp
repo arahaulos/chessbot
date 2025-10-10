@@ -193,7 +193,6 @@ void nnue_network::move_piece(piece p, piece old_p, square_index from_sq, square
                                            encode_input_with_buckets(type,     flipped_color,     from_flipped_sq_index, bksq),
                                            encode_input_with_buckets(old_type, old_flipped_color, to_flipped_sq_index,   bksq));
 
-
     }
 }
 

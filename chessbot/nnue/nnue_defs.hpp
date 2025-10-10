@@ -68,7 +68,7 @@ inline int encode_input_with_buckets(int type, int color, int sq_index, int king
         index += 1;
     }
     index += (type-1)*2;
-    return index + king_bucket*12*64;
+    return index + king_bucket*inputs_per_bucket;
 }
 
 inline int encode_factorizer_input(int type, int color, int sq_index, int king_sq)
@@ -84,7 +84,7 @@ inline int encode_factorizer_input(int type, int color, int sq_index, int king_s
         index += 1;
     }
     index += (type-1)*2;
-    return index + king_bucket*12*64;
+    return index + king_bucket*inputs_per_bucket;
 }
 
 inline int encode_output_bucket(uint64_t non_pawn_pieces)

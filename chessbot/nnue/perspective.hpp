@@ -2,8 +2,6 @@
 
 #include "layer.hpp"
 
-#include <bitset>
-
 constexpr int acculumator_update_table_size = 64;
 
 
@@ -85,16 +83,20 @@ struct acculumator_update_table
     void addsub(int add_index, int sub_index)
     {
         fused = (num_of_updates == 0 ? FU_ADDSUB : FU_NONE);
-        updates[num_of_updates++] = add_index+1;
-        updates[num_of_updates++] = -sub_index-1;
+        updates[num_of_updates+0] = add_index+1;
+        updates[num_of_updates+1] = -sub_index-1;
+
+        num_of_updates += 2;
     }
 
     void addsubsub(int add_index, int sub_index0, int sub_index1)
     {
         fused = (num_of_updates == 0 ? FU_ADDSUBSUB : FU_NONE);
-        updates[num_of_updates++] = add_index+1;
-        updates[num_of_updates++] = -sub_index0-1;
-        updates[num_of_updates++] = -sub_index1-1;
+        updates[num_of_updates+0] = add_index+1;
+        updates[num_of_updates+1] = -sub_index0-1;
+        updates[num_of_updates+2] = -sub_index1-1;
+
+        num_of_updates += 3;
     }
 
     void clear(int16_t *acc, bool clean)
@@ -115,11 +117,10 @@ struct nnue_perspective
         weights = w;
         neurons_buffer = new int16_t[NEURONS+64];
         acculumator_buffer = new int16_t[NEURONS*130+64];
+        outputs_idx_buffer = new int16_t[NEURONS+64];
 
         neurons = align_ptr(neurons_buffer);
         acculumator = align_ptr(acculumator_buffer);
-
-        outputs_idx_buffer = new int16_t[NEURONS+64];
         outputs_idx = align_ptr(outputs_idx_buffer);
 
         if (shuffle_lut_buffer == nullptr) {
@@ -414,9 +415,7 @@ struct nnue_perspective
             }
             prev_acculumator = table->acculumator;
 
-            if (table->refresh) {
-                is_refresh = true;
-            }
+            is_refresh |= table->refresh;
 
             apply_updates(table);
         }
@@ -442,13 +441,13 @@ struct nnue_perspective
 
         #if USE_AVX2
 
+
+        const __m256i z = _mm256_setzero_si256();
         const __m256i minv = _mm256_set1_epi16(0);
         const __m256i maxv = _mm256_set1_epi16(halfkp_quantization_fractions);
 
         for (int i = 0; i < NEURONS; i += 16) {
             __m256i acc = _mm256_load_si256((__m256i*)&accul[i]);
-
-            const __m256i z = _mm256_setzero_si256();
 
             uint32_t gt_mm = _mm256_movemask_epi8(_mm256_packs_epi16(_mm256_cmpgt_epi16(acc, z), z));
 

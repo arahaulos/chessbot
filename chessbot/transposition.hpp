@@ -10,6 +10,9 @@ constexpr int32_t TT_MIN_EVAL = -TT_MAX_EVAL;
 constexpr int EVAL_CACHE_ENTRIES_PER_BUCKET = 4;
 constexpr int TT_ENTRIES_IN_BUCKET = 4;
 
+constexpr uint64_t EVAL_CACHE_KEY_BITS = 0xFFFFFFFFFFFF0000ull;
+constexpr uint64_t EVAL_CACHE_VALUE_BITS = 0xFFFFull;
+
 inline int32_t score_to_tt(int32_t score, int ply)
 {
     if (is_mate_score(score)) {
@@ -55,24 +58,25 @@ struct eval_cache_bucket
         }
     }
 
-    void bring_front(int index, const uint64_t &new_entry)
+    void bring_front(int index, const uint64_t &new_data)
     {
         for (int i = index; i >= 1; i--) {
             entries[i] = entries[i-1];
         }
-        entries[0] = new_entry;
+        entries[0] = new_data;
     }
 
     uint64_t entries[EVAL_CACHE_ENTRIES_PER_BUCKET];
 
     bool probe(const uint64_t &zhash, int32_t &score_out) {
+        uint64_t key = zhash & EVAL_CACHE_KEY_BITS;
         for (int i = 0; i < EVAL_CACHE_ENTRIES_PER_BUCKET; i++) {
-            uint64_t entry = entries[i];
-            int16_t score16 = entry & 0xFFFF;
-            if ((entry & 0xFFFFFFFFFFFF0000ull) == (zhash & 0xFFFFFFFFFFFF0000ull)) {
+            uint64_t data = entries[i];
+            int16_t score16 = data & EVAL_CACHE_VALUE_BITS;
+            if ((data & EVAL_CACHE_KEY_BITS) == key) {
                 score_out = score16;
 
-                bring_front(i, entry);
+                bring_front(i, data);
 
                 return true;
             }
@@ -81,15 +85,15 @@ struct eval_cache_bucket
     }
 
     void store(const uint64_t &zhash, int32_t score_to_write) {
-        uint64_t new_entry = (zhash & 0xFFFFFFFFFFFF0000ull) | (score_to_write & 0xFFFF);
-
+        uint64_t key = zhash & EVAL_CACHE_KEY_BITS;
+        uint64_t new_data = key | (score_to_write & EVAL_CACHE_VALUE_BITS);
         for (int i = 0; i < EVAL_CACHE_ENTRIES_PER_BUCKET; i++) {
-            if ((entries[i] & 0xFFFFFFFFFFFF0000ull) == (zhash & 0xFFFFFFFFFFFF0000ull)) {
-                bring_front(i, new_entry);
+            if ((entries[i] & EVAL_CACHE_KEY_BITS) == key) {
+                bring_front(i, new_data);
                 return;
             }
         }
-        bring_front(EVAL_CACHE_ENTRIES_PER_BUCKET - 1, new_entry);
+        bring_front(EVAL_CACHE_ENTRIES_PER_BUCKET - 1, new_data);
     }
 };
 

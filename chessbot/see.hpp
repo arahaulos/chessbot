@@ -30,8 +30,6 @@ inline int32_t static_exchange_evaluation(board_state &state, chess_move m)
 
     bitboard mask = ~((uint64_t)0);
 
-    bool found = false;
-
     do {
         occupation &= ~from_sq_bb;
         occupation |= to_sq_bb;
@@ -52,19 +50,16 @@ inline int32_t static_exchange_evaluation(board_state &state, chess_move m)
                                   bitboard_utils.queen_attack(to_sq, occupation, mask),
                                   bitboard_utils.king_attack(to_sq, mask)};
 
-        found = false;
-
+        attacker_type = EMPTY;
         for (int i = PAWN; i <= KING; i++) {
             bitboard bb = bitboards[i][turn] & attacks[i];
             if (bb != 0) {
                 attacker_type = i;
                 from_sq_bb = (bb & (-bb));
-
-                found = true;
                 break;
             }
         }
-    } while (found);
+    } while (attacker_type != EMPTY);
 
     see_eval[num_of_captures] = 0;
     for (int i = num_of_captures-1; i >= 1; i--) {

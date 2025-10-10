@@ -103,7 +103,7 @@ struct training_perspective_weights
         return NEURONS + (num_perspective_inputs*NEURONS);
     }
 
-    void rmsprop(training_perspective_weights<INPUTS, NEURONS> *grad, training_perspective_weights<INPUTS, NEURONS> *pg, float learning_rate, int tid, int tc)
+    void rmsprop(training_perspective_weights<INPUTS, NEURONS> *grad, training_perspective_weights<INPUTS, NEURONS> *pg, float learning_rate, float weight_decay, int tid, int tc)
     {
         float epsilon = 0.0000001f;
 
@@ -113,6 +113,7 @@ struct training_perspective_weights
         __m256 cmax = _mm256_set1_ps(halfkp_quantization_clamp_max);
 
         __m256 lr = _mm256_set1_ps(learning_rate);
+        __m256 wd = _mm256_set1_ps(weight_decay);
 
         int per_thread = INPUTS*NEURONS / tc;
         int start = per_thread*tid;
@@ -123,9 +124,9 @@ struct training_perspective_weights
 
             __m256 v = _mm256_load_ps(&pg->weights[i]);
 
-            __m256 mul = _mm256_mul_ps(lr, inv_sqrt_plus_eps(v, epsilon));
+            __m256 delta = _mm256_fmadd_ps(g, inv_sqrt_plus_eps(v, epsilon), _mm256_mul_ps(w, wd));
 
-            __m256 nw = _mm256_fnmadd_ps(g, mul, w);
+            __m256 nw = _mm256_fnmadd_ps(lr, delta, w);
 
             nw = _mm256_min_ps(nw, cmax);
             nw = _mm256_max_ps(nw, cmin);
@@ -141,9 +142,9 @@ struct training_perspective_weights
 
                 __m256 v = _mm256_load_ps(&pg->biases[i]);
 
-                __m256 mul = _mm256_mul_ps(lr, inv_sqrt_plus_eps(v, epsilon));
+                __m256 delta = _mm256_fmadd_ps(g, inv_sqrt_plus_eps(v, epsilon), _mm256_mul_ps(b, wd));
 
-                __m256 nb = _mm256_fnmadd_ps(g, mul, b);
+                __m256 nb = _mm256_fnmadd_ps(lr, delta, b);
 
                 nb = _mm256_min_ps(nb, cmax);
                 nb = _mm256_max_ps(nb, cmin);
