@@ -32,9 +32,9 @@ struct datagen_worker
         t.join();
     }
 
-    void start(std::atomic<int> &games, int depth, int nodes, bool random, std::shared_ptr<nnue_weights> weights)
+    void start(std::atomic<int> &games, int depth, int nodes, std::shared_ptr<nnue_weights> weights, std::shared_ptr<std::vector<std::string>> openings, bool multi_pv_opening, int opening_moves)
     {
-        t = std::thread(&datagen_worker::play, this, std::ref(games), depth, nodes, random, weights);
+        t = std::thread(&datagen_worker::play, this, std::ref(games), depth, nodes, weights, openings, multi_pv_opening, opening_moves);
     }
 
     std::vector<selfplay_result> results;
@@ -42,7 +42,7 @@ struct datagen_worker
     double avg_start_pos_abs_eval;
     double avg_opening_branching_factor;
 private:
-    void play(std::atomic<int> &games, int d, int n, bool random, std::shared_ptr<nnue_weights> weights);
+    void play(std::atomic<int> &games, int d, int n, std::shared_ptr<nnue_weights> weights, std::shared_ptr<std::vector<std::string>> openings, bool multi_pv_opening, int opening_moves);
 
     std::unique_ptr<alphabeta_search> bot;
 
@@ -51,7 +51,7 @@ private:
 };
 
 
-void datagen_worker::play(std::atomic<int> &games, int d, int n, bool random, std::shared_ptr<nnue_weights> weights)
+void datagen_worker::play(std::atomic<int> &games, int d, int n, std::shared_ptr<nnue_weights> weights, std::shared_ptr<std::vector<std::string>> openings, bool multi_pv_opening, int opening_moves)
 {
     std::srand((size_t)time(NULL) + worker_id);
 
@@ -68,6 +68,7 @@ void datagen_worker::play(std::atomic<int> &games, int d, int n, bool random, st
 
     while (games > 0) {
         game.reset();
+        game.get_state().load_fen((*openings)[rand()%openings->size()]);
         bot->new_game();
 
         std::vector<position_evaluation> game_positions;
@@ -75,7 +76,7 @@ void datagen_worker::play(std::atomic<int> &games, int d, int n, bool random, st
         game_win_type_t win_status = NO_WIN;
         game_win_type_t mate_found_win = NO_WIN;
 
-        int random_moves = (random ? 8 : 14);
+        int random_moves = opening_moves;
 
         double total_depth = 0;
         int searched_moves = 0;
@@ -84,7 +85,7 @@ void datagen_worker::play(std::atomic<int> &games, int d, int n, bool random, st
         while (true) {
             if (random_moves > 0) {
                 std::vector<chess_move> acceptable_moves;
-                if (random) {
+                if (!multi_pv_opening) {
                     acceptable_moves = game.get_state().get_all_legal_moves(game.get_state().get_turn());
                 } else {
                     constexpr int multipv = 5;
@@ -193,16 +194,28 @@ void datagen_worker::play(std::atomic<int> &games, int d, int n, bool random, st
 }
 
 
-void training_datagen::datagen(std::string output_file, std::string nnue_file, int threads, int games, int depth, int nodes, bool random_opening)
+void training_datagen::datagen(std::string output_file, std::string nnue_file, int threads, int games, int depth, int nodes, bool multi_pv_opening, int opening_moves, std::string opening_suite)
 {
-    std::cout << std::endl << "Selfplaying\nthreads = " << threads
-                           << "\nmin depth = " << depth
-                           << "\nmin nodes = " << nodes
-                           << "\nrandom opening = " << random_opening
-                           << "\noutput = " << output_file
-                           << "\nnnue = " << (nnue_file != "" ? nnue_file : "default") << std::endl;
+    std::cout << std::endl << "Selfplaying\nThreads: " << threads
+                           << "\nMin depth: " << depth
+                           << "\nMin nodes: " << nodes
+                           << "\nOutput file: " << output_file
+                           << "\nNNUE: " << (nnue_file != "" ? nnue_file : "embedded") << std::endl;
 
     std::shared_ptr<nnue_weights> weights = std::make_shared<nnue_weights>();
+    std::shared_ptr<std::vector<std::string>> openings = std::make_shared<std::vector<std::string>>();
+
+    if (opening_suite != "") {
+        *openings = load_opening_suite(opening_suite);
+    } else {
+        openings->push_back("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
+    }
+
+    std::cout << "Opening suite: " << opening_suite << std::endl;
+    std::cout << "Opening positions: " << openings->size() << std::endl;
+    std::cout << "Multi PV opening: " << multi_pv_opening << std::endl;
+    std::cout << "Opening moves: " << opening_moves << std::endl;
+
 
     if (nnue_file != "") {
         std::cout << "Loading shared nnue weights: " << nnue_file << std::endl;
@@ -217,7 +230,7 @@ void training_datagen::datagen(std::string output_file, std::string nnue_file, i
     std::atomic<int> agames = games;
 
     for (int i = 0; i < threads; i++) {
-        workers[i].start(agames, depth, nodes, random_opening, weights);
+        workers[i].start(agames, depth, nodes, weights, openings, multi_pv_opening, opening_moves);
     }
 
     int prev_positions = 0;

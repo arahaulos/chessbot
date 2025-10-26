@@ -231,21 +231,31 @@ struct nnue_layer
 
         #if USE_AVX2
 
-        __m256i acc[OUT / 8];
-        for (int i = 0; i < OUT / 8; i++) {
-            acc[i] = _mm256_set1_epi32(0);
+        constexpr int vec_out = OUT / 16;
+
+        __m256i acc_lo[vec_out];
+        __m256i acc_hi[vec_out];
+
+        for (int i = 0; i < vec_out; i++) {
+            acc_lo[i] = _mm256_set1_epi32(0);
+            acc_hi[i] = _mm256_set1_epi32(0);
         }
 
         for (int i = 0; i < IN; i += 4) {
             __m256i input0 = _mm256_set1_epi32(*(int32_t*)&p_layer[i+0]);
             __m256i input1 = _mm256_set1_epi32(*(int32_t*)&p_layer[i+2]);
 
-            for (int j = 0; j < OUT / 8; j += 2) {
-                __m256i w16_0 = _mm256_load_si256((__m256i*)&weights_ptr[(i+0)*OUT + j*8]);
-                __m256i w16_1 = _mm256_load_si256((__m256i*)&weights_ptr[(i+1)*OUT + j*8]);
+            const int16_t* __restrict w0 = &weights_ptr[(i+0)*OUT];
+            const int16_t* __restrict w1 = &weights_ptr[(i+1)*OUT];
+            const int16_t* __restrict w2 = &weights_ptr[(i+2)*OUT];
+            const int16_t* __restrict w3 = &weights_ptr[(i+3)*OUT];
 
-                __m256i w16_2 = _mm256_load_si256((__m256i*)&weights_ptr[(i+2)*OUT + j*8]);
-                __m256i w16_3 = _mm256_load_si256((__m256i*)&weights_ptr[(i+3)*OUT + j*8]);
+            for (int j = 0; j < vec_out; j++) {
+                __m256i w16_0 = _mm256_load_si256((__m256i*)&w0[j*16]);
+                __m256i w16_1 = _mm256_load_si256((__m256i*)&w1[j*16]);
+
+                __m256i w16_2 = _mm256_load_si256((__m256i*)&w2[j*16]);
+                __m256i w16_3 = _mm256_load_si256((__m256i*)&w3[j*16]);
 
                 __m256i w0_lo = _mm256_unpacklo_epi16(w16_0, w16_1);
                 __m256i w0_hi = _mm256_unpackhi_epi16(w16_0, w16_1);
@@ -253,21 +263,20 @@ struct nnue_layer
                 __m256i w1_lo = _mm256_unpacklo_epi16(w16_2, w16_3);
                 __m256i w1_hi = _mm256_unpackhi_epi16(w16_2, w16_3);
 
-                acc[j] = _mm256_add_epi32(acc[j], _mm256_madd_epi16(input0, w0_lo));
-                acc[j+1] = _mm256_add_epi32(acc[j+1], _mm256_madd_epi16(input0, w0_hi));
+                acc_lo[j] = _mm256_add_epi32(acc_lo[j], _mm256_madd_epi16(input0, w0_lo));
+                acc_hi[j] = _mm256_add_epi32(acc_hi[j], _mm256_madd_epi16(input0, w0_hi));
 
-                acc[j] = _mm256_add_epi32(acc[j], _mm256_madd_epi16(input1, w1_lo));
-                acc[j+1] = _mm256_add_epi32(acc[j+1], _mm256_madd_epi16(input1, w1_hi));
+                acc_lo[j] = _mm256_add_epi32(acc_lo[j], _mm256_madd_epi16(input1, w1_lo));
+                acc_hi[j] = _mm256_add_epi32(acc_hi[j], _mm256_madd_epi16(input1, w1_hi));
             }
         }
 
-        //Lets fix interleaving after everything is summed
-        for (int j = 0; j < OUT / 8; j += 2) {
-            __m256i lo = acc[j];
-            __m256i hi = acc[j+1];
+        __m256i acc[OUT / 8];
 
-            acc[j]   = _mm256_permute2x128_si256(lo, hi, 0x20);
-            acc[j+1] = _mm256_permute2x128_si256(lo, hi, 0x31);
+        //Lets fix interleaving after everything is summed
+        for (int i = 0; i < vec_out; i++) {
+            acc[i*2+0] = _mm256_permute2x128_si256(acc_lo[i], acc_hi[i], 0x20);
+            acc[i*2+1] = _mm256_permute2x128_si256(acc_lo[i], acc_hi[i], 0x31);
         }
 
         __m256i minv = _mm256_set1_epi32(0);
@@ -364,10 +373,14 @@ struct nnue_layer
 
         #if USE_AVX2
 
-        __m256i acc[OUT / 8];
+        constexpr int vec_out = OUT / 16;
 
-        for (int i = 0; i < OUT / 8; i++) {
-            acc[i] = _mm256_set1_epi32(0);
+        __m256i acc_lo[vec_out];
+        __m256i acc_hi[vec_out];
+
+        for (int i = 0; i < vec_out; i++) {
+            acc_lo[i] = _mm256_set1_epi32(0);
+            acc_hi[i] = _mm256_set1_epi32(0);
         }
 
         for (int i = 0; i < num_of_active_inputs0; i += 4) {
@@ -376,15 +389,15 @@ struct nnue_layer
             int16_t idx2 = p_layer0_idx[i+2];
             int16_t idx3 = p_layer0_idx[i+3];
 
-            __m256i input0 = _mm256_set1_epi32((int32_t)p_layer0[idx0] | ((int32_t)p_layer0[idx1] << 16));
-            __m256i input1 = _mm256_set1_epi32((int32_t)p_layer0[idx2] | ((int32_t)p_layer0[idx3] << 16));
+            __m256i input0 = _mm256_unpacklo_epi16(_mm256_set1_epi16(p_layer0[idx0]), _mm256_set1_epi16(p_layer0[idx1]));
+            __m256i input1 = _mm256_unpacklo_epi16(_mm256_set1_epi16(p_layer0[idx2]), _mm256_set1_epi16(p_layer0[idx3]));
 
-            for (int j = 0; j < OUT / 8; j += 2) {
-                __m256i w16_0 = _mm256_load_si256((__m256i*)&weights0_ptr[idx0*OUT + j*8]);
-                __m256i w16_1 = _mm256_load_si256((__m256i*)&weights0_ptr[idx1*OUT + j*8]);
+            for (int j = 0; j < vec_out; j++) {
+                __m256i w16_0 = _mm256_load_si256((__m256i*)&weights0_ptr[idx0*OUT + j*16]);
+                __m256i w16_1 = _mm256_load_si256((__m256i*)&weights0_ptr[idx1*OUT + j*16]);
 
-                __m256i w16_2 = _mm256_load_si256((__m256i*)&weights0_ptr[idx2*OUT + j*8]);
-                __m256i w16_3 = _mm256_load_si256((__m256i*)&weights0_ptr[idx3*OUT + j*8]);
+                __m256i w16_2 = _mm256_load_si256((__m256i*)&weights0_ptr[idx2*OUT + j*16]);
+                __m256i w16_3 = _mm256_load_si256((__m256i*)&weights0_ptr[idx3*OUT + j*16]);
 
                 __m256i w0_lo = _mm256_unpacklo_epi16(w16_0, w16_1);
                 __m256i w0_hi = _mm256_unpackhi_epi16(w16_0, w16_1);
@@ -392,29 +405,28 @@ struct nnue_layer
                 __m256i w1_lo = _mm256_unpacklo_epi16(w16_2, w16_3);
                 __m256i w1_hi = _mm256_unpackhi_epi16(w16_2, w16_3);
 
-                acc[j] = _mm256_add_epi32(acc[j], _mm256_madd_epi16(input0, w0_lo));
-                acc[j+1] = _mm256_add_epi32(acc[j+1], _mm256_madd_epi16(input0, w0_hi));
+                acc_lo[j] = _mm256_add_epi32(acc_lo[j], _mm256_madd_epi16(input0, w0_lo));
+                acc_hi[j] = _mm256_add_epi32(acc_hi[j], _mm256_madd_epi16(input0, w0_hi));
 
-                acc[j] = _mm256_add_epi32(acc[j], _mm256_madd_epi16(input1, w1_lo));
-                acc[j+1] = _mm256_add_epi32(acc[j+1], _mm256_madd_epi16(input1, w1_hi));
+                acc_lo[j] = _mm256_add_epi32(acc_lo[j], _mm256_madd_epi16(input1, w1_lo));
+                acc_hi[j] = _mm256_add_epi32(acc_hi[j], _mm256_madd_epi16(input1, w1_hi));
             }
         }
-
         for (int i = 0; i < num_of_active_inputs1; i += 4) {
             int16_t idx0 = p_layer1_idx[i];
             int16_t idx1 = p_layer1_idx[i+1];
             int16_t idx2 = p_layer1_idx[i+2];
             int16_t idx3 = p_layer1_idx[i+3];
 
-            __m256i input0 = _mm256_set1_epi32((int32_t)p_layer1[idx0] | ((int32_t)p_layer1[idx1] << 16));
-            __m256i input1 = _mm256_set1_epi32((int32_t)p_layer1[idx2] | ((int32_t)p_layer1[idx3] << 16));
+            __m256i input0 = _mm256_unpacklo_epi16(_mm256_set1_epi16(p_layer1[idx0]), _mm256_set1_epi16(p_layer1[idx1]));
+            __m256i input1 = _mm256_unpacklo_epi16(_mm256_set1_epi16(p_layer1[idx2]), _mm256_set1_epi16(p_layer1[idx3]));
 
-            for (int j = 0; j < OUT / 8; j += 2) {
-                __m256i w16_0 = _mm256_load_si256((__m256i*)&weights1_ptr[idx0*OUT + j*8]);
-                __m256i w16_1 = _mm256_load_si256((__m256i*)&weights1_ptr[idx1*OUT + j*8]);
+            for (int j = 0; j < vec_out; j++) {
+                __m256i w16_0 = _mm256_load_si256((__m256i*)&weights1_ptr[idx0*OUT + j*16]);
+                __m256i w16_1 = _mm256_load_si256((__m256i*)&weights1_ptr[idx1*OUT + j*16]);
 
-                __m256i w16_2 = _mm256_load_si256((__m256i*)&weights1_ptr[idx2*OUT + j*8]);
-                __m256i w16_3 = _mm256_load_si256((__m256i*)&weights1_ptr[idx3*OUT + j*8]);
+                __m256i w16_2 = _mm256_load_si256((__m256i*)&weights1_ptr[idx2*OUT + j*16]);
+                __m256i w16_3 = _mm256_load_si256((__m256i*)&weights1_ptr[idx3*OUT + j*16]);
 
                 __m256i w0_lo = _mm256_unpacklo_epi16(w16_0, w16_1);
                 __m256i w0_hi = _mm256_unpackhi_epi16(w16_0, w16_1);
@@ -422,21 +434,20 @@ struct nnue_layer
                 __m256i w1_lo = _mm256_unpacklo_epi16(w16_2, w16_3);
                 __m256i w1_hi = _mm256_unpackhi_epi16(w16_2, w16_3);
 
-                acc[j] = _mm256_add_epi32(acc[j], _mm256_madd_epi16(input0, w0_lo));
-                acc[j+1] = _mm256_add_epi32(acc[j+1], _mm256_madd_epi16(input0, w0_hi));
+                acc_lo[j] = _mm256_add_epi32(acc_lo[j], _mm256_madd_epi16(input0, w0_lo));
+                acc_hi[j] = _mm256_add_epi32(acc_hi[j], _mm256_madd_epi16(input0, w0_hi));
 
-                acc[j] = _mm256_add_epi32(acc[j], _mm256_madd_epi16(input1, w1_lo));
-                acc[j+1] = _mm256_add_epi32(acc[j+1], _mm256_madd_epi16(input1, w1_hi));
+                acc_lo[j] = _mm256_add_epi32(acc_lo[j], _mm256_madd_epi16(input1, w1_lo));
+                acc_hi[j] = _mm256_add_epi32(acc_hi[j], _mm256_madd_epi16(input1, w1_hi));
             }
         }
 
-        //Lets fix interleaving after everything is summed
-        for (int j = 0; j < OUT / 8; j += 2) {
-            __m256i lo = acc[j];
-            __m256i hi = acc[j+1];
+        __m256i acc[OUT / 8];
 
-            acc[j]   = _mm256_permute2x128_si256(lo, hi, 0x20);
-            acc[j+1] = _mm256_permute2x128_si256(lo, hi, 0x31);
+        //Lets fix interleaving after everything is summed
+        for (int i = 0; i < vec_out; i++) {
+            acc[i*2+0] = _mm256_permute2x128_si256(acc_lo[i], acc_hi[i], 0x20);
+            acc[i*2+1] = _mm256_permute2x128_si256(acc_lo[i], acc_hi[i], 0x31);
         }
 
         //Lets add bias and calculate activation

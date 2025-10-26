@@ -534,7 +534,3 @@ private:
     std::mutex info_lock;
     std::vector<search_info> search_infos;
 };
-
-
-std::string eval_to_str(int32_t score);
-

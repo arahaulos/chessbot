@@ -4,9 +4,11 @@ builds/
 tuning/
 vis/
 *.o
+*.out
 *.bat
 *.exe
 *.cbp
 *.depend
 *.layout
 *.txt
+*.sh

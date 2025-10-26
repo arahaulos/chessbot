@@ -47,7 +47,6 @@ struct acculumator_refresh_table_entry
     acculumator_refresh_table_entry() {
         acculumator_buffer = new int16_t[num_perspective_neurons+64];
         acculumator = align_ptr(acculumator_buffer);
-        valid = false;
     }
     ~acculumator_refresh_table_entry() {
         delete [] acculumator_buffer;
@@ -57,10 +56,7 @@ struct acculumator_refresh_table_entry
     {
         p->acculumator_copy(acculumator, p->acculumator);
         state = *s;
-        valid = true;
     }
-
-    bool valid;
     int16_t *acculumator;
     nnue_board_state state;
 
@@ -75,11 +71,10 @@ struct nnue_network
                                                    white_side(&w->perspective_weights),
                                                    layer1(&w->layer1_weights),
                                                    layer2(&w->layer2_weights),
-                                                   output_layer(&w->output_weights) { current_state = &state_stack[0]; test_flag = true; };
+                                                   output_layer(&w->output_weights) { reset_nnue(); };
 
 
     int16_t evaluate(const board_state &s);
-
 
     void refresh(const board_state &s, player_type_t stm);
     int16_t evaluate(player_type_t stm);
@@ -133,7 +128,7 @@ struct nnue_network
     std::shared_ptr<nnue_weights> weights;
     bool test_flag;
 private:
-    void full_refresh(const board_state &s, player_type_t stm);
+    void reset_nnue();
 
 
     nnue_perspective<num_perspective_inputs, num_perspective_neurons> black_side;

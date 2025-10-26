@@ -4,54 +4,27 @@
 #include "huffman.hpp"
 
 
-void nnue_network::full_refresh(const board_state &s, player_type_t stm)
+void nnue_network::reset_nnue()
 {
-    current_state->white_king_sq = s.white_king_square.index;
-    current_state->black_king_sq = s.black_king_square.index;
+    current_state = &state_stack[0];
 
-    if (stm == WHITE) {
-        white_side.reset();
-        white_side.update_table->refresh = true;
-
-        int white_king_sq = s.white_king_square.index;
-
-        uint64_t occupation = s.pieces_by_color[0] | s.pieces_by_color[1];
-
-        while (occupation) {
-            int i = bit_scan_forward_clear(occupation);
-
-            piece p = s.get_square(i);
-
-            int type = p.get_type();
-            int color = p.get_player();
-            int sq_index = i;
-
-            white_side.update_table->add(encode_input_with_buckets(type, color, sq_index, white_king_sq));
-        }
-    } else {
-        black_side.reset();
-        black_side.update_table->refresh = true;
-
-        int black_king_sq = s.black_king_square.index ^ 56;
-
-        uint64_t occupation = s.pieces_by_color[0] | s.pieces_by_color[1];
-
-        while (occupation) {
-            int i = bit_scan_forward_clear(occupation);
-
-            piece p = s.get_square(i);
-
-            int type = p.get_type();
-            int color = p.get_player();
-
-            int flipped_sq_index = i^56;
-            int flipped_color = (color == BLACK ? WHITE : BLACK);
-
-            black_side.update_table->add(encode_input_with_buckets(type, flipped_color, flipped_sq_index, black_king_sq));
+    current_state->white_king_sq = -1;
+    current_state->black_king_sq = -1;
+    for (int i = 0; i < 8; i++) {
+        for (int j = 0; j < 2; j++) {
+            current_state->bb[i][j] = 0;
         }
     }
-}
 
+    white_side.reset();
+    black_side.reset();
+
+    for (int i = 0; i < 64; i++) {
+        white_refresh_table[i].save(&white_side, current_state);
+        black_refresh_table[i].save(&black_side, current_state);
+    }
+
+}
 
 void nnue_network::refresh(const board_state &s, player_type_t stm)
 {
@@ -62,11 +35,7 @@ void nnue_network::refresh(const board_state &s, player_type_t stm)
         int white_king_sq = s.white_king_square.index;
 
         acculumator_refresh_table_entry *entry = &white_refresh_table[s.white_king_square.index];
-        if (!entry->valid) {
-            full_refresh(s, stm);
 
-            return;
-        }
         white_side.update_table->clear(white_side.acculumator, true);
         white_side.update_table->refresh = true;
         white_side.acculumator_copy(white_side.acculumator, entry->acculumator);
@@ -89,11 +58,7 @@ void nnue_network::refresh(const board_state &s, player_type_t stm)
         int black_king_sq = s.black_king_square.index ^ 56;
 
         acculumator_refresh_table_entry *entry = &black_refresh_table[s.black_king_square.index];
-        if (!entry->valid) {
-            full_refresh(s, stm);
 
-            return;
-        }
         black_side.update_table->clear(black_side.acculumator, true);
         black_side.update_table->refresh = true;
         black_side.acculumator_copy(black_side.acculumator, entry->acculumator);
@@ -213,8 +178,8 @@ int16_t nnue_network::evaluate(player_type_t stm)
         black_refresh_table[current_state->black_king_sq].save(&black_side, current_state);
     }
 
-    white_side.update();
-    black_side.update();
+    white_side.update_activations();
+    black_side.update_activations();
     if (stm == WHITE) {
         layer1.update(output_bucket, white_side.neurons, white_side.outputs_idx, white_side.num_of_outputs, black_side.neurons, black_side.outputs_idx, black_side.num_of_outputs);
     } else {
@@ -333,8 +298,6 @@ void nnue_weights::save(std::string path)
     }
     file.close();
 }
-
-
 
 
 

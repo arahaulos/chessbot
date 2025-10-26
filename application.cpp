@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <iostream>
 #include <sstream>
+#include <iomanip>
 #include "application.hpp"
 #include "chessbot/perft.hpp"
 #include "chessbot/search.hpp"
@@ -20,14 +21,14 @@ application::application()
 }
 
 
-void application::datagen(std::string folder, std::string nnue_file, int threads, int depth, int nodes, bool random, int games_per_file, int max_files)
+void application::datagen(std::string folder, std::string nnue_file, std::string opening_suite, int threads, int depth, int nodes, bool multi_pv_opening, int opening_moves, int games_per_file, int max_files)
 {
     int filenum = 0;
     while (filenum < max_files) {
         filenum++;
 
         std::stringstream ss;
-        ss << folder << "\\nodes" << nodes / 1000 << "k_" << games_per_file << "_" << filenum << ".txt";
+        ss << folder << "/nodes" << nodes / 1000 << "k_" << games_per_file << "_" << filenum << ".txt";
 
         std::string filename = ss.str();
 
@@ -36,7 +37,7 @@ void application::datagen(std::string folder, std::string nnue_file, int threads
             file.close();
             continue;
         }
-        training_datagen::datagen(filename, nnue_file, threads, games_per_file, depth, nodes, random);
+        training_datagen::datagen(filename, nnue_file, threads, games_per_file, depth, nodes, multi_pv_opening, opening_moves, opening_suite);
     }
 }
 
@@ -154,21 +155,25 @@ int application::test_incremental_updates()
 
         int16_t eval0 = net.evaluate(game->get_state());
         int16_t eval1 = game->get_state().nnue->evaluate(game->get_state().get_turn());
+
+
         if (eval0 != eval1) {
             std::cout << "Evaluation failed!!! " << eval0 << " != " << eval1 << std::endl;
             failed = true;
-            break;
         }
+
 
         if (zhash0 != zhash1) {
             std::cout << "Zobrist hashing failed!!! " << zhash0 << " != " << zhash1 << std::endl;
             failed = true;
-            break;
         }
 
         if (shash0 != shash1) {
             std::cout << "Zobrist structure hashing failed!!! " << shash0 << " != " << shash1 << std::endl;
             failed = true;
+        }
+
+        if (failed) {
             break;
         }
     }
@@ -272,6 +277,107 @@ void application::run()
     }
 }
 
+
+void application::eval_trace(std::string fen)
+{
+    board_state state;
+    state.load_fen(fen);
+
+    nnue_network net(std::make_shared<nnue_weights>());
+
+    int32_t eval = net.evaluate(state);
+
+    float values[64];
+    for (int i = 0; i < 64; i++) {
+        piece p = state.get_square(i);
+        if (p.get_type() == EMPTY || p.get_type() == KING) {
+            values[i] = 0.0f;
+        } else {
+            state.set_square(i, piece(WHITE, EMPTY));
+
+            int32_t new_eval = net.evaluate(state);
+
+            state.set_square(i, p);
+
+            values[i] = static_cast<float>(eval - new_eval)*4.0f/719;
+        }
+    }
+
+    constexpr int square_width = 8;
+    constexpr int square_height = 4;
+
+    constexpr int buffer_width = square_width*8+1;
+    constexpr int buffer_height = square_height*8+1;
+
+    char buffer[buffer_width*buffer_height+1];
+    std::memset(buffer, ' ', buffer_width*buffer_height);
+    buffer[buffer_width*buffer_height] = 0;
+
+    auto print_buffer = [&] () {
+        for (int y = 0; y < buffer_height; y++) {
+            for (int x = 0; x < buffer_width; x++) {
+                std::cout << buffer[y*buffer_width+x];
+            }
+            std::cout << "\n";
+        }
+        std::cout << std::endl;
+    };
+
+    auto insert_char = [&] (int x, int y, char c) {
+        if (x >= 0 && x < buffer_width && y >= 0 && y < buffer_height) {
+            buffer[y*buffer_width+x] = c;
+        }
+    };
+
+    auto insert_text = [&] (int start_x, int start_y, std::string str) {
+        int x = start_x;
+        int y = start_y;
+        for (int i = 0; i < str.length(); i++) {
+            char c = str[i];
+            if (c == '\n') {
+                x = start_x;
+                y++;
+            } else {
+                insert_char(x, y, c);
+                x++;
+            }
+        }
+    };
+
+    for (int sy = 0; sy < buffer_height; sy++) {
+        insert_char(buffer_width-1, sy, '|');
+    }
+    for (int sx = 0; sx < buffer_width; sx++) {
+        insert_char(sx, buffer_height-1, '-');
+    }
+
+    for (int i = 0; i < 64; i++) {
+        int x = (i%8)*square_width;
+        int y = (i/8)*square_height;
+
+        for (int sx = 0; sx < square_width; sx++) {
+            insert_char(x + sx, y, '-');
+        }
+        for (int sy = 0; sy < square_height; sy++) {
+            insert_char(x, y + sy, '|');
+        }
+
+        piece p = state.get_square(i);
+        if (p.get_type() == EMPTY) {
+            continue;
+        }
+
+        std::stringstream ss;
+        ss << std::setprecision(3);
+        ss << player_to_str(p.get_player()) << "\n";
+        ss << piece_to_str(p.get_type()) << "\n";
+        ss << values[i];
+
+        insert_text(x+1, y+1, ss.str());
+    }
+
+    print_buffer();
+}
 
 
 

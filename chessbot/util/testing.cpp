@@ -6,6 +6,7 @@
 #include <thread>
 #include <fstream>
 #include <atomic>
+#include <iomanip>
 #include "misc.hpp"
 #include "../timeman.hpp"
 
@@ -165,6 +166,7 @@ int testing_utility::test(int games, int time, int time_inc, alphabeta_search &b
     std::cout << "Beta: " << beta << std::endl;
     std::cout << "LLR upper limit: " << upper << std::endl;
     std::cout << "LLR lower limit: " << lower << std::endl;
+    std::cout << "Opening suite: " << opening_suite << " (" << openings->size() << " positions)" << std::endl;
     std::cout << "Playing " << games << " games with " << (float)time/1000.0f << "s + " << time_inc << "ms" << " time control.  Threads: " << threads << std::endl;
 
     while (agames > 0) {

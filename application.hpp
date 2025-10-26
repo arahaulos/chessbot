@@ -17,8 +17,8 @@ public:
     void run();
     void run_tests();
     void run_benchmark();
-
-    void datagen(std::string folder, std::string nnue_file, int threads, int depth, int nodes, bool random, int games_per_file, int max_files);
+    void eval_trace(std::string fen);
+    void datagen(std::string folder, std::string nnue_file, std::string opening_suite, int threads, int depth, int nodes, bool multi_pv_opening, int opening_moves, int games_per_file, int max_files);
 private:
     int perft_test(std::string position_fen, std::vector<int> expected_results);
     int test_incremental_updates();

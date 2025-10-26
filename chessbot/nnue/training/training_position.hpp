@@ -9,10 +9,11 @@ enum training_position_flags {WHITE_TURN = 0x1, RESULT_STM_WIN = 0x1 << 1, RESUL
 
 class board_state;
 struct selfplay_result;
+struct chess_move;
 
 struct training_position
 {
-    training_position() {};
+    training_position() { bm = 0;};
 
     training_position(const selfplay_result &spr);
     training_position(const board_state &state, const selfplay_result &spr);
@@ -86,11 +87,16 @@ struct training_position
         return !(*this == other);
     }
 
+    void get_best_move(chess_move &best_move);
+
     uint64_t occupation;
     int16_t eval;
     uint8_t flags;
+    uint16_t bm;
+    uint8_t bm_pieces;
     uint8_t packed_pieces[16];
 
 private:
+    void encode_best_move(const board_state &state, const chess_move &best_move);
     void init(const board_state &state, float wdl, int32_t score);
 };

@@ -332,7 +332,7 @@ void uci_interface::send_info_strings(int search_time)
             for (int j = 0; j < multi_pv; j++) {
                 int32_t eval = scale_eval(info.lines[j]->score);
 
-                if (eval == MIN_EVAL) {
+                if (info.lines[j]->score == MIN_EVAL) {
                     continue;
                 }
 

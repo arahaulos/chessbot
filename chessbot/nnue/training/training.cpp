@@ -609,7 +609,7 @@ void training_loop(std::string net_file, std::string qnet_file, std::shared_ptr<
     worker_thread_pool thread_pool(16, weights, gradient, gradient_sq, first_moment, second_moment, corrected_first_moment, corrected_second_moment);
 
     bool use_factorized = true;
-    float learning_rate = 0.0004f;
+    float learning_rate = 0.0002f;
     float weight_decay = 0.001f;
     float beta1 = 0.9f;
     float beta2 = 0.999f;

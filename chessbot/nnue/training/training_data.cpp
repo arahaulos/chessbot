@@ -92,7 +92,7 @@ void save_binary_data(std::vector<training_position> &dataset, std::string outpu
 {
     std::stringstream ss;
     ss << output_folder;
-    ss << "\\";
+    ss << "/";
     ss << "data" << file_number << ".bin";
 
     std::cout << "Saving data: " << ss.str() << "... ";

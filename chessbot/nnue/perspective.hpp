@@ -423,11 +423,7 @@ struct nnue_perspective
         return is_refresh;
     }
 
-    void update() {
-        if (!update_table->is_clean || update_table->num_of_updates > 0) {
-            apply_all_updates();
-        }
-
+    void update_activations() {
         int16_t *accul = (int16_t*)__builtin_assume_aligned(acculumator, 64);
         int16_t *neuron = (int16_t*)__builtin_assume_aligned(neurons, 64);
 

@@ -1,34 +1,13 @@
 #include "search.hpp"
 #include <algorithm>
-#include <float.h>
 #include <iostream>
 #include <memory>
 #include <thread>
 #include <cmath>
 #include <chrono>
-#include <iomanip>
 #include "movepicker.hpp"
 #include "movegen.hpp"
-#include "sstream"
-
-#include <array>
-
 #include "zobrist.hpp"
-
-std::string eval_to_str(int32_t score)
-{
-    std::stringstream ss;
-    if (is_mate_score(score)) {
-        if (score < 0) {
-            ss << "-";
-        }
-        ss << "M";
-        ss << get_mate_distance(score);
-    } else {
-        ss << ((float)score)/100;
-    }
-    return ss.str();
-}
 
 alphabeta_search::alphabeta_search()
 {
@@ -900,12 +879,8 @@ int32_t alphabeta_search::alphabeta(board_state &state, int32_t alpha, int32_t b
             !(is_pv && mpicker.legal_moves < 3))
         {
             if (!(is_pv || tt_node_type == PV_NODE)) {
-                reductions += 2;
+                reductions += 1 + !improving;
             }
-            if (!improving) {
-                reductions += 1;
-            }
-
             if (causes_check || in_check) {
                 reductions -= 1;
             }
@@ -975,12 +950,6 @@ int32_t alphabeta_search::alphabeta(board_state &state, int32_t alpha, int32_t b
 
             if (score >= beta) {
                 node_type = CUT_NODE;
-
-                if (depth > 5) {
-                    sc.stats.fail_high_index += mpicker.legal_moves;
-                    sc.stats.fail_highs += 1;
-                }
-
                 break;
             }
 
@@ -1000,6 +969,7 @@ int32_t alphabeta_search::alphabeta(board_state &state, int32_t alpha, int32_t b
             best_score = (MIN_EVAL + ply);
         }
     }
+
 
     if (is_score_valid(best_score) && best_move.valid()) {
         //Update static evaluation correction history

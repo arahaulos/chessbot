@@ -64,7 +64,7 @@ struct square_index
     }
 
     bool valid() const {
-        return (get_x() < 64 && get_y() < 64);
+        return (index < 64);
     }
 
     inline bool operator == (const square_index &other) const {
