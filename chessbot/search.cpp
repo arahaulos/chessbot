@@ -666,7 +666,7 @@ int32_t alphabeta_search::alphabeta(board_state &state, int32_t alpha, int32_t b
     }
 
     //Internal iterative reduction
-    //If this unexplored part of tree proves to be important, there will be tt hits at next time this subtree is searched (next ID iteration or LMR/PVS/Aspiration research)
+    //If this unexplored part of tree proves to be important, there will be tt hits at next iteration
     if ((is_pv || is_cut) && depth >= 3 && !tt_hit) {
         depth -= 1;
     }
@@ -728,7 +728,7 @@ int32_t alphabeta_search::alphabeta(board_state &state, int32_t alpha, int32_t b
 
     //Singular search
     //When tt entry is found which is marked as cut or pv node, reduced search is performed to check if there is alternative good moves
-    //When singular search fails high, there might be other moves which can be either better or equally good
+    //When singular search fails high, there might be other moves which can be also good
     //When singular search fails low, there is only one good move and move is so called singular move.
     int tt_move_extensions = 0;
     if (tt_hit &&
@@ -767,6 +767,7 @@ int32_t alphabeta_search::alphabeta(board_state &state, int32_t alpha, int32_t b
                 //Changes that deeper search doesn't fail high is low
                 return score;
             } else if (tt_score >= beta) {
+                //Our singular beta wasn't high enough to get cutoff
                 tt_move_extensions -= 2;
             } else if (is_cut) {
                 tt_move_extensions -= 1;
@@ -891,7 +892,7 @@ int32_t alphabeta_search::alphabeta(board_state &state, int32_t alpha, int32_t b
                 reductions /= 2;
             }
 
-            reductions = std::clamp(reductions, 1, new_depth/2);
+            reductions = std::clamp(reductions, 0, new_depth/2);
 
             reduced_depth = new_depth - reductions;
         }
@@ -1018,10 +1019,6 @@ int32_t alphabeta_search::quisearch(board_state &state, int32_t alpha, int32_t b
     int32_t tt_static_eval = 0;
     bool tt_hit = transposition_table[state.zhash].probe(state, state.zhash, tt_move, tt_depth, tt_node_type, tt_score, tt_static_eval, ply);
 
-    if (tt_hit) {
-        eval_cache[state.zhash].store(state.zhash, tt_static_eval);
-    }
-
     if (!is_pv &&
         tt_hit &&
         tt_score != 0 &&
@@ -1032,6 +1029,10 @@ int32_t alphabeta_search::quisearch(board_state &state, int32_t alpha, int32_t b
         } else if (tt_node_type == ALL_NODE && tt_score <= alpha) {
             return tt_score;
         }
+    }
+
+    if (tt_hit) {
+        eval_cache[state.zhash].store(state.zhash, tt_static_eval);
     }
 
     int32_t raw_eval = (tt_hit ? tt_static_eval : static_evaluation(state, state.get_turn(), sc.stats));
@@ -1075,7 +1076,7 @@ int32_t alphabeta_search::quisearch(board_state &state, int32_t alpha, int32_t b
             return eval;
         }
 
-        //Moves are ordered with SEE. Moves which have negative see are pruned
+        //Non TT moves which have negative SEE are pruned. Captures are tried before any other moves. MVV-LVV is used to sort captures
         bool tt_move_found = false;
         for (int i = 0; i < num_of_moves; i++) {
             chess_move mov = movelist[i];
@@ -1084,6 +1085,9 @@ int32_t alphabeta_search::quisearch(board_state &state, int32_t alpha, int32_t b
                 moves.add(mov, 32000);
             } else {
                 int32_t see = static_exchange_evaluation(state, mov);
+                if (mov.is_capture()) {
+                    see += sc.history.get_capture_history(mov)/32;
+                }
                 if (see >= 0) {
                     moves.add(mov, see);
                 }

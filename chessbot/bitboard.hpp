@@ -10,14 +10,8 @@
     #define USE_PEXT 0
 #endif
 
+
 typedef uint64_t bitboard;
-
-inline uint32_t bit_scan_forward_32(uint32_t u32) {
-    uint32_t r = 0;
-    __asm__ ("rep bsf\t%1, %0" : "+r"(r) : "r"(u32));
-    return r;
-}
-
 
 inline uint64_t bit_scan_forward(uint64_t u64) {
     uint64_t r = 0;

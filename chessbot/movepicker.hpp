@@ -242,7 +242,7 @@ struct move_picker
     }
 
     void add_promotion_moves() {
-        chess_move moves[16];
+        chess_move moves[48];
         int num_of_moves = move_generator::generate_promotion_moves(*state, state->get_turn(), moves);
         for (int i = 0; i < num_of_moves; i++) {
             chess_move m = moves[i];
@@ -251,7 +251,11 @@ struct move_picker
             }
             int32_t score = history_table->get_quiet_history(ply, m);
 
-            promotions.add(m, score);
+            if (!promotions.is_full()) {
+                promotions.add(m, score);
+            } else {
+                good_non_killers.add(m, score);
+            }
         }
     }
 

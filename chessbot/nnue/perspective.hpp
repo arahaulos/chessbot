@@ -68,19 +68,19 @@ struct acculumator_update_table
 
     fused_update_type_t fused;
 
-    void add(int index)
+    void op_add(int index)
     {
         fused = FU_NONE;
         updates[num_of_updates++] = index+1;
     }
 
-    void sub(int index)
+    void op_sub(int index)
     {
         fused = FU_NONE;
         updates[num_of_updates++] = -index-1;
     }
 
-    void addsub(int add_index, int sub_index)
+    void op_addsub(int add_index, int sub_index)
     {
         fused = (num_of_updates == 0 ? FU_ADDSUB : FU_NONE);
         updates[num_of_updates+0] = add_index+1;
@@ -89,7 +89,7 @@ struct acculumator_update_table
         num_of_updates += 2;
     }
 
-    void addsubsub(int add_index, int sub_index0, int sub_index1)
+    void op_addsubsub(int add_index, int sub_index0, int sub_index1)
     {
         fused = (num_of_updates == 0 ? FU_ADDSUBSUB : FU_NONE);
         updates[num_of_updates+0] = add_index+1;
@@ -429,18 +429,14 @@ struct nnue_perspective
 
         num_of_outputs = 0;
 
-        __m128i idx_lo = _mm_set_epi16(7, 6, 5, 4, 3, 2, 1, 0);
-        __m128i idx_hi = _mm_set_epi16(15, 14, 13, 12, 11, 10, 9, 8);
-
-        const __m128i idx_add = _mm_set1_epi16(16);
-
-
         #if USE_AVX2
-
 
         const __m256i z = _mm256_setzero_si256();
         const __m256i minv = _mm256_set1_epi16(0);
         const __m256i maxv = _mm256_set1_epi16(halfkp_quantization_fractions);
+
+        __m256i idx = _mm256_set_epi16(15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0);
+        const __m256i idx_add = _mm256_set1_epi16(16);
 
         for (int i = 0; i < NEURONS; i += 16) {
             __m256i acc = _mm256_load_si256((__m256i*)&accul[i]);
@@ -452,6 +448,7 @@ struct nnue_perspective
 
             __m128i ctl_lo = _mm_load_si128((__m128i*)&shuffle_lut[gt_lo*16]);
             __m128i ctl_hi = _mm_load_si128((__m128i*)&shuffle_lut[gt_hi*16]);
+            __m256i ctl  = _mm256_set_m128i(ctl_hi, ctl_lo);
 
             __m256i act = _mm256_min_epi16(_mm256_max_epi16(acc, minv), maxv);
 
@@ -460,19 +457,21 @@ struct nnue_perspective
             int k_lo = _mm_popcnt_u32(gt_lo);
             int k_hi = _mm_popcnt_u32(gt_hi);
 
-            __m128i packed_idx_lo = _mm_shuffle_epi8(idx_lo, ctl_lo);
-            __m128i packed_idx_hi = _mm_shuffle_epi8(idx_hi, ctl_hi);
+            __m256i packed_idx = _mm256_shuffle_epi8(idx, ctl);
 
-            _mm_storeu_si128((__m128i*)(outputs_idx + num_of_outputs), packed_idx_lo);
-            _mm_storeu_si128((__m128i*)(outputs_idx + num_of_outputs + k_lo), packed_idx_hi);
+            _mm256_storeu2_m128i((__m128i*)&outputs_idx[num_of_outputs + k_lo], (__m128i*)&outputs_idx[num_of_outputs], packed_idx);
+
+            idx = _mm256_add_epi16(idx, idx_add);
 
             num_of_outputs += k_lo + k_hi;
-
-            idx_lo = _mm_add_epi16(idx_lo, idx_add);
-            idx_hi = _mm_add_epi16(idx_hi, idx_add);
         }
 
         #else
+
+        __m128i idx_lo = _mm_set_epi16(7, 6, 5, 4, 3, 2, 1, 0);
+        __m128i idx_hi = _mm_set_epi16(15, 14, 13, 12, 11, 10, 9, 8);
+
+        const __m128i idx_add = _mm_set1_epi16(16);
 
         const __m128i minv = _mm_set1_epi16(0);
         const __m128i maxv = _mm_set1_epi16(halfkp_quantization_fractions);

@@ -46,11 +46,11 @@ void nnue_network::refresh(const board_state &s, player_type_t stm)
 
                 while (add) {
                     int sq_index = bit_scan_forward_clear(add);
-                    white_side.update_table->add(encode_input_with_buckets(i, ((j != 0) ? BLACK : WHITE), sq_index, white_king_sq));
+                    white_side.update_table->op_add(encode_input_with_buckets(i, ((j != 0) ? BLACK : WHITE), sq_index, white_king_sq));
                 }
                 while (sub) {
                     int sq_index = bit_scan_forward_clear(sub);
-                    white_side.update_table->sub(encode_input_with_buckets(i, ((j != 0) ? BLACK : WHITE), sq_index, white_king_sq));
+                    white_side.update_table->op_sub(encode_input_with_buckets(i, ((j != 0) ? BLACK : WHITE), sq_index, white_king_sq));
                 }
             }
         }
@@ -69,11 +69,11 @@ void nnue_network::refresh(const board_state &s, player_type_t stm)
 
                 while (add) {
                     int sq_index = bit_scan_forward_clear(add);
-                    black_side.update_table->add(encode_input_with_buckets(i, ((j != 0) ? WHITE : BLACK), sq_index ^ 56, black_king_sq));
+                    black_side.update_table->op_add(encode_input_with_buckets(i, ((j != 0) ? WHITE : BLACK), sq_index ^ 56, black_king_sq));
                 }
                 while (sub) {
                     int sq_index = bit_scan_forward_clear(sub);
-                    black_side.update_table->sub(encode_input_with_buckets(i, ((j != 0) ? WHITE : BLACK), sq_index ^ 56, black_king_sq));
+                    black_side.update_table->op_sub(encode_input_with_buckets(i, ((j != 0) ? WHITE : BLACK), sq_index ^ 56, black_king_sq));
                 }
             }
         }
@@ -95,8 +95,8 @@ void nnue_network::set_piece(piece p, square_index sq)
     int wksq = current_state->white_king_sq;
     int bksq = current_state->black_king_sq^56;
 
-    white_side.update_table->add(encode_input_with_buckets(type, color, sq_index, wksq));
-    black_side.update_table->add(encode_input_with_buckets(type, flipped_color, flipped_sq_index, bksq));
+    white_side.update_table->op_add(encode_input_with_buckets(type, color, sq_index, wksq));
+    black_side.update_table->op_add(encode_input_with_buckets(type, flipped_color, flipped_sq_index, bksq));
 }
 
 void nnue_network::unset_piece(piece p, square_index sq)
@@ -113,8 +113,8 @@ void nnue_network::unset_piece(piece p, square_index sq)
     int wksq = current_state->white_king_sq;
     int bksq = current_state->black_king_sq^56;
 
-    white_side.update_table->sub(encode_input_with_buckets(type, color, sq_index, wksq));
-    black_side.update_table->sub(encode_input_with_buckets(type, flipped_color, flipped_sq_index, bksq));
+    white_side.update_table->op_sub(encode_input_with_buckets(type, color, sq_index, wksq));
+    black_side.update_table->op_sub(encode_input_with_buckets(type, flipped_color, flipped_sq_index, bksq));
 }
 
 void nnue_network::move_piece(piece p, piece old_p, square_index from_sq, square_index to_sq)
@@ -137,11 +137,11 @@ void nnue_network::move_piece(piece p, piece old_p, square_index from_sq, square
     int bksq = current_state->black_king_sq^56;
 
     if (old_p.get_type() == EMPTY) {
-        white_side.update_table->addsub(encode_input_with_buckets(type, color, to_sq_index,   wksq),
-                                        encode_input_with_buckets(type, color, from_sq_index, wksq));
+        white_side.update_table->op_addsub(encode_input_with_buckets(type, color, to_sq_index,   wksq),
+                                           encode_input_with_buckets(type, color, from_sq_index, wksq));
 
-        black_side.update_table->addsub(encode_input_with_buckets(type, flipped_color, to_flipped_sq_index,   bksq),
-                                        encode_input_with_buckets(type, flipped_color, from_flipped_sq_index, bksq));
+        black_side.update_table->op_addsub(encode_input_with_buckets(type, flipped_color, to_flipped_sq_index,   bksq),
+                                           encode_input_with_buckets(type, flipped_color, from_flipped_sq_index, bksq));
     } else {
         int old_type = old_p.get_type();
         int old_color = old_p.get_player();
@@ -150,13 +150,13 @@ void nnue_network::move_piece(piece p, piece old_p, square_index from_sq, square
 
         current_state->bb[old_type][old_color == BLACK] &= ~(0x1ULL << to_sq_index);
 
-        white_side.update_table->addsubsub(encode_input_with_buckets(type,     color,     to_sq_index,   wksq),
-                                           encode_input_with_buckets(type,     color,     from_sq_index, wksq),
-                                           encode_input_with_buckets(old_type, old_color, to_sq_index,   wksq));
+        white_side.update_table->op_addsubsub(encode_input_with_buckets(type,     color,     to_sq_index,   wksq),
+                                              encode_input_with_buckets(type,     color,     from_sq_index, wksq),
+                                              encode_input_with_buckets(old_type, old_color, to_sq_index,   wksq));
 
-        black_side.update_table->addsubsub(encode_input_with_buckets(type,     flipped_color,     to_flipped_sq_index,   bksq),
-                                           encode_input_with_buckets(type,     flipped_color,     from_flipped_sq_index, bksq),
-                                           encode_input_with_buckets(old_type, old_flipped_color, to_flipped_sq_index,   bksq));
+        black_side.update_table->op_addsubsub(encode_input_with_buckets(type,     flipped_color,     to_flipped_sq_index,   bksq),
+                                              encode_input_with_buckets(type,     flipped_color,     from_flipped_sq_index, bksq),
+                                              encode_input_with_buckets(old_type, old_flipped_color, to_flipped_sq_index,   bksq));
 
     }
 }

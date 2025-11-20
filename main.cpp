@@ -32,12 +32,11 @@ int main()
     nnue_trainer::find_scaling_factor_for_net("qnetkb16_512x2-(16-32-1)x8.nnue", positions);
     nnue_trainer::test_nets("netkb16_512x2-(16-32-1)x8.nnue", "qnetkb16_512x2-(16-32-1)x8.nnue", positions);//*/
 
-    //training_data_utility::convert_training_data({"tuning/selfplays_UHO_2"}, "tuning/data_UHO_2", 1024);
+    /*training_data_utility::convert_training_data({"tuning/selfplays_UHO_4"}, "tuning/data_UHO_4", 1024);
 
-    /*nnue_trainer::train("netkb16_512x2-(16-32-1)x8.nnue", "qnetkb16_512x2-(16-32-1)x8.nnue", {"tuning/data8", "tuning/data9", "tuning/data10",  "tuning/data11",
-                                                                                              "tuning/data12", "tuning/data13",  "tuning/data14", "tuning/data15",
+    nnue_trainer::train("netkb16_512x2-(16-32-1)x8.nnue", "qnetkb16_512x2-(16-32-1)x8.nnue", {/*"tuning/data12", "tuning/data13", "tuning/data14", "tuning/data15",
                                                                                               "tuning/data16",  "tuning/data17",
-                                                                                              "tuning/data_UHO_1", "tuning/data_UHO_2"});//*/
+                                                                                              "tuning/data_UHO_1", "tuning/data_UHO_2", "tuning/data_UHO_3", "tuning/data_UHO_4"});//*/
 
     /*tuning_utility::tune_search_params(1000, 25, 16, 100000, "search_tuning.txt", {"rfmargin_mult", "rfmargin_improving_modifier",
                                                                                    "fmargin_mult", "fmargin_base",
@@ -47,14 +46,15 @@ int main()
     /*std::unique_ptr<alphabeta_search> bot0 = std::make_unique<alphabeta_search>();
     std::unique_ptr<alphabeta_search> bot1 = std::make_unique<alphabeta_search>();
 
-    bot0->load_nnue_net("qnetkb16_512x2-(16-32-1)x8.nnue");
-    bot1->load_nnue_net("embedded_weights.nnue");
+    //bot0->load_nnue_net("qnetkb16_512x2-(16-32-1)x8.nnue");
+    //bot1->load_nnue_net("embedded_weights.nnue");
     bot0->set_threads(1);
     bot1->set_threads(1);
     bot0->test_flag = true;
-    bot1->test_flag = true;
+    bot1->test_flag = false;
 
-    testing_utility::test(100000, 1000, 100, *bot0, *bot1, 16, "tuning/UHO_4060_v4.epd", 0.0, 5.0f);
+    testing_utility::test(100000, 1000, 100, *bot0, *bot1, 16, "tuning/UHO_Lichess_4852_v1.epd", 0.0, 5.0f);
+    //testing_utility::test(100000, 1000, 100, *bot0, *bot1, 16, "tuning/UHO_4060_v4.epd", 0.0, 5.0f);
     //testing_utility::test(100000, 1000, 100, *bot0, *bot1, 16, "tuning/new2500.epd", 0.0, 5.0f);
     //*/
 
@@ -62,7 +62,7 @@ int main()
     //app->run_benchmark();
     app->run();
     //app->run_tests();
-    //app->datagen("tuning/selfplays_UHO_2", "", "tuning/UHO_4060_v4.epd", 28, 8, 5000, true, 8, 32000, 1000);
+    //app->datagen("tuning/selfplays_UHO_5", "", "tuning/UHO_Lichess_4852_v1.epd", 28, 8, 7000, true, 8, 32000, 1000);
 
 
     return 0;
