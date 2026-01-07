@@ -80,19 +80,24 @@ struct history_heurestic_table
         return score;
     }
 
+    void store_killer(chess_move mov, int ply)
+    {
+        int b = KILLER_MOVE_SLOTS-1;
+        for (int i = 0; i < KILLER_MOVE_SLOTS; i++) {
+            if (killer_moves[ply][i] == mov) {
+                b = i;
+                break;
+            }
+        }
+        for (int i = b; i >= 1; i--) {
+            killer_moves[ply][i] = killer_moves[ply][i-1];
+        }
+        killer_moves[ply][0] = mov;
+    }
+
     void update(chess_move bm, int depth, int ply, chess_move *searched_quiets, int searched_quiet_count, chess_move *searched_captures, int searched_capture_count) {
         if (!bm.is_capture()) {
-            int b = KILLER_MOVE_SLOTS-1;
-            for (int i = 0; i < KILLER_MOVE_SLOTS; i++) {
-                if (killer_moves[ply][i] == bm) {
-                    b = i;
-                    break;
-                }
-            }
-            for (int i = b; i >= 1; i--) {
-                killer_moves[ply][i] = killer_moves[ply][i-1];
-            }
-            killer_moves[ply][0] = bm;
+            store_killer(bm, ply);
         }
 
         if (depth < 3) {

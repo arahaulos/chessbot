@@ -1,5 +1,6 @@
 #pragma once
 
+
 inline int32_t static_exchange_evaluation(board_state &state, chess_move m)
 {
     //SEE does not work for en passant. Return 0
@@ -69,14 +70,6 @@ inline int32_t static_exchange_evaluation(board_state &state, chess_move m)
 
     return see_eval[0];
 }
-
-
-
-
-
-
-
-
 
 
 

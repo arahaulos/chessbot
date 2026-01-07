@@ -217,13 +217,9 @@ unsigned char* embedded_weights_data = _binary_embedded_weights_nnue_start;
 
 nnue_weights::nnue_weights()
 {
-    //std::cout << "Decompressing embedded NNUE... ";
-
     uint8_t *decoded_data;
     int decoded_size;
     huffman_coder::decode(embedded_weights_data, embedded_weights_size, decoded_data, decoded_size);
-
-    //std::cout << "done.\nLoading embedded NNUE... ";
 
     rescale_factor0 = 1;
     rescale_factor1 = 1;
@@ -235,8 +231,6 @@ nnue_weights::nnue_weights()
     output_weights.load((int16_t*)decoded_data, index);
 
     delete [] decoded_data;
-
-    //std::cout << "done." << std::endl;
 }
 
 

@@ -3,10 +3,10 @@
 #include "chessbot/nnue/training/training.hpp"
 #include "chessbot/util/testing.hpp"
 #include "chessbot/util/tuning.hpp"
-#include "chessbot/util/datagen.hpp"
 
 void global_init()
 {
+    nnue_weights::get_shared_weights();
     std::srand(time(NULL));
 }
 
@@ -21,49 +21,51 @@ void export_output_weights(std::string output_file)
     weights->save(output_file);
 }
 
+void test_search()
+{
+    std::unique_ptr<searcher> s0 = std::make_unique<searcher>();
+    std::unique_ptr<searcher> s1 = std::make_unique<searcher>();
+
+    std::shared_ptr<nnue_weights> w0 = std::make_shared<nnue_weights>();
+    std::shared_ptr<nnue_weights> w1 = std::make_shared<nnue_weights>();
+    w0->load("qnetkb16_512x2-(16-32-1)x8.nnue");
+    w1->load("embedded_weights.nnue");
+    s0->set_shared_weights(w0);
+    s1->set_shared_weights(w1);
+
+    s0->set_threads(1);
+    s1->set_threads(1);
+    s0->test_flag = true;
+    s1->test_flag = true;
+
+    testing_utility::test(100000, 2000, 50, *s0, *s1, 16, "tuning/UHO_Lichess_4852_v1.epd", 0.0, 3.0f);
+}
+
+void train()
+{
+    //training_data_utility::convert_training_data({"tuning/selfplays_HQ_1"}, "tuning/data_HQ_1", 1024);
+    nnue_trainer::train("netkb16_512x2-(16-32-1)x8.nnue", "qnetkb16_512x2-(16-32-1)x8.nnue", {//"tuning/data4", "tuning/data5", "tuning/data6", "tuning/data7",
+                                                                                              //"tuning/data8", "tuning/data9", "tuning/data10", "tuning/data11",
+                                                                                              //"tuning/data12", "tuning/data13", "tuning/data14", "tuning/data15",
+                                                                                              "tuning/data16",  "tuning/data17",
+                                                                                              "tuning/data_UHO_1", "tuning/data_UHO_2", "tuning/data_UHO_3", "tuning/data_UHO_4", "tuning/data_UHO_5", "tuning/data_N4M_1"});//*/
+
+    //nnue_trainer::train("netkb16_512x2-(16-32-1)x8.nnue", "qnetkb16_512x2-(16-32-1)x8.nnue", {"tuning/data_HQ_1"});
+}
 
 int main()
 {
     global_init();
     print_info();
 
-    /*std::vector<selfplay_result> positions;
-    load_selfplay_results(positions, "tuning/selfplays_nnue20/nodes5k_32000_1.txt");
-    nnue_trainer::find_scaling_factor_for_net("qnetkb16_512x2-(16-32-1)x8.nnue", positions);
-    nnue_trainer::test_nets("netkb16_512x2-(16-32-1)x8.nnue", "qnetkb16_512x2-(16-32-1)x8.nnue", positions);//*/
 
-    /*training_data_utility::convert_training_data({"tuning/selfplays_UHO_4"}, "tuning/data_UHO_4", 1024);
-
-    nnue_trainer::train("netkb16_512x2-(16-32-1)x8.nnue", "qnetkb16_512x2-(16-32-1)x8.nnue", {/*"tuning/data12", "tuning/data13", "tuning/data14", "tuning/data15",
-                                                                                              "tuning/data16",  "tuning/data17",
-                                                                                              "tuning/data_UHO_1", "tuning/data_UHO_2", "tuning/data_UHO_3", "tuning/data_UHO_4"});//*/
-
-    /*tuning_utility::tune_search_params(1000, 25, 16, 100000, "search_tuning.txt", {"rfmargin_mult", "rfmargin_improving_modifier",
-                                                                                   "fmargin_mult", "fmargin_base",
-                                                                                   "hmargin_mult", "razoring_margin",
-                                                                                   "probcut_margin", "good_quiet_treshold"}, "tuning/UHO_4060_v4.epd");//*/
-
-    /*std::unique_ptr<alphabeta_search> bot0 = std::make_unique<alphabeta_search>();
-    std::unique_ptr<alphabeta_search> bot1 = std::make_unique<alphabeta_search>();
-
-    //bot0->load_nnue_net("qnetkb16_512x2-(16-32-1)x8.nnue");
-    //bot1->load_nnue_net("embedded_weights.nnue");
-    bot0->set_threads(1);
-    bot1->set_threads(1);
-    bot0->test_flag = true;
-    bot1->test_flag = false;
-
-    testing_utility::test(100000, 1000, 100, *bot0, *bot1, 16, "tuning/UHO_Lichess_4852_v1.epd", 0.0, 5.0f);
-    //testing_utility::test(100000, 1000, 100, *bot0, *bot1, 16, "tuning/UHO_4060_v4.epd", 0.0, 5.0f);
-    //testing_utility::test(100000, 1000, 100, *bot0, *bot1, 16, "tuning/new2500.epd", 0.0, 5.0f);
-    //*/
+    //train();
+    //test_search();
 
     std::unique_ptr<application> app = std::make_unique<application>();
     //app->run_benchmark();
     app->run();
     //app->run_tests();
-    //app->datagen("tuning/selfplays_UHO_5", "", "tuning/UHO_Lichess_4852_v1.epd", 28, 8, 7000, true, 8, 32000, 1000);
-
 
     return 0;
 }

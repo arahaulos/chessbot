@@ -1,7 +1,7 @@
 #include "uci.hpp"
-#include "timeman.hpp"
+#include "search_manager.hpp"
 #include <sstream>
-
+#include "util/wdl_model.hpp"
 
 int32_t scale_eval(int32_t score)
 {
@@ -13,6 +13,7 @@ int32_t scale_eval(int32_t score)
         return score;
     }
 }
+
 
 std::vector<std::string> split_string(std::string str, char d)
 {
@@ -30,15 +31,20 @@ std::vector<std::string> split_string(std::string str, char d)
 }
 
 
-uci_interface::uci_interface(std::shared_ptr<alphabeta_search> search_inst, std::shared_ptr<game_state> game_inst)
+uci_interface::uci_interface(std::shared_ptr<searcher> search_inst, std::shared_ptr<game_state> game_inst)
 {
     running = false;
     search_instance = search_inst;
     game_instance = game_inst;
     exit_flag = false;
 
-    time_man = std::make_shared<time_manager>(0,0);
+    show_wdl = false;
+    ponder = false;
 
+    time_man = std::make_shared<time_manager>(0,0);
+    search_man = std::make_shared<search_manager>();
+
+    search_man->set_uci(this);
     //uci_log.open("uci_log.txt");
 }
 
@@ -63,8 +69,7 @@ void uci_interface::start()
     std::cout << "Starting UCI" << std::endl;
 
     running = true;
-    uci_thread = std::thread(&uci_interface::main_loop, this);
-    input_thread = std::thread(&uci_interface::input_loop, this);
+    uci_thread = std::thread(&uci_interface::input_loop, this);
 }
 
 void uci_interface::stop()
@@ -73,9 +78,11 @@ void uci_interface::stop()
         return;
     }
     running = false;
-
     uci_thread.join();
-    input_thread.join();
+
+    if (search_thread.joinable()) {
+        search_thread.join();
+    }
 }
 
 std::string uci_interface::parse_command(std::string line, int word)
@@ -87,44 +94,31 @@ std::string uci_interface::parse_command(std::string line, int word)
     return std::string("");
 }
 
+void uci_interface::search_thread_entry()
+{
+    search_instance->search(game_instance->get_state(), search_man);
+}
+
 
 void uci_interface::input_loop()
 {
     std::string input_str;
     while (running) {
         while (std::getline(std::cin, input_str)) {
-            input_lock.lock();
-            inputs.push(input_str);
-            input_lock.unlock();
+            if (uci_log.is_open()) {
+                uci_log << "GUI: " << input_str << "\n";
+            }
 
             if (input_str == "quit") {
+                exit_flag = true;
                 return;
+            } else {
+                execute_command(input_str);
             }
         }
-        std::this_thread::sleep_for(std::chrono::milliseconds(5));
     }
 }
 
-
-bool uci_interface::get_command(std::string &str_out)
-{
-    bool r = false;
-
-    input_lock.lock();
-    if (!inputs.empty()) {
-        str_out = inputs.front();
-        inputs.pop();
-        r = true;
-
-        if (uci_log.is_open()) {
-            uci_log << "GUI: " << str_out << "\n";
-        }
-
-    }
-    input_lock.unlock();
-
-    return r;
-}
 
 void uci_interface::send_command(std::string cmd)
 {
@@ -159,14 +153,22 @@ void uci_interface::execute_command(std::string cmd_line)
         ss << "option name MultiPV type spin default 1 min 1 max " << MAX_MULTI_PV;
         send_command(ss.str());
 
+        ss.str(std::string());
+        ss << "option name Move Overhead type spin default " << time_manager::get_default_overhead() << " min 0 max 10000";
+        send_command(ss.str());
+
+        ss.str(std::string());
+        ss << "option name UCI_ShowWDL type check default false";
+        send_command(ss.str());
+
+        ss.str(std::string());
+        ss << "option name Ponder type check default false";
+        send_command(ss.str());
+
         send_command("uciok");
     } else if (cmd == "isready") {
         send_command("readyok");
     } else if (cmd == "position") {
-        if (search_instance->is_searching()) {
-            search_instance->stop_search();
-        }
-
         std::vector<std::string> splitted_cmd = split_string(cmd_line, ' ');
 
         std::vector<chess_move> moves;
@@ -213,9 +215,10 @@ void uci_interface::execute_command(std::string cmd_line)
             game_instance->get_state().make_move(*it);
         }
     } else if (cmd == "go") {
-        if (search_instance->is_searching()) {
-            search_instance->stop_search();
+        if (search_thread.joinable()) {
+            search_thread.join();
         }
+
         std::vector<std::string> splitted_cmd = split_string(cmd_line, ' ');
 
         go_info info;
@@ -242,12 +245,13 @@ void uci_interface::execute_command(std::string cmd_line)
                     info.binc = std::atoi(next_it->c_str());
                 }
                 if (str == "depth") {
-                    info.type = GO_INFINITE;
-                    search_instance->limit_search(std::atoi(next_it->c_str()), 1);
+                    info.type = GO_DEPTH;
+                    info.depth = std::atoi(next_it->c_str());
+
                 }
                if (str == "nodes") {
-                    info.type = GO_INFINITE;
-                    search_instance->limit_search(0, std::atoi(next_it->c_str()));
+                    info.type = GO_NODES;
+                    info.nodes = std::atoi(next_it->c_str());
                 }
             }
             if (str == "infinite") {
@@ -265,24 +269,35 @@ void uci_interface::execute_command(std::string cmd_line)
             } else {
                 time_man->init(info.btime, info.binc);
             }
-            search_instance->begin_search(game_instance->get_state(), time_man);
-        } else {
-            search_instance->begin_search(game_instance->get_state());
+            search_man->prepare_clock_search(time_man);
+        } else if (info.type == GO_NODES) {
+            search_man->prepare_fixed_nodes_search(info.nodes);
+        } else if (info.type == GO_DEPTH) {
+            search_man->prepare_fixed_depth_search(info.depth);
+        } else if (info.type == GO_MOVETIME) {
+            search_man->prepare_fixed_time_search(info.movetime);
+        } else if (info.type == GO_INFINITE || info.type == GO_PONDER) {
+            search_man->prepare_infinite_search();
         }
+
+        search_thread = std::thread(&uci_interface::search_thread_entry, this);
 
         last_info_depth = 0;
     } else if (cmd == "stop") {
-        if (search_instance->is_searching()) {
-            search_instance->stop_search();
-
-            send_command("bestmove " + search_instance->get_move().to_uci());
-
-            ginfo.active = false;
+        search_man->stop_search();
+        if (search_thread.joinable()) {
+            search_thread.join();
         }
+    } else if (cmd == "ponderhit") {
+        //When ponderhit happens, stop search and begin new search with clock
+        ginfo.type = GO_CLOCK;
+        if (game_instance->get_state().get_turn() == WHITE) {
+            time_man->init(ginfo.wtime, ginfo.winc);
+        } else {
+            time_man->init(ginfo.btime, ginfo.binc);
+        }
+        search_man->start_clock(time_man);
     } else if (cmd == "ucinewgame") {
-        if (search_instance->is_searching()) {
-            search_instance->stop_search();
-        }
         search_instance->new_game();
     } else if (cmd == "quit") {
         exit_flag = true;
@@ -312,22 +327,55 @@ void uci_interface::execute_command(std::string cmd_line)
         } else if (option_name == "MultiPV") {
             int multi_pv = atoi(option_value.c_str());
             search_instance->set_multi_pv(multi_pv);
+        } else if (option_name == "UCI_ShowWDL") {
+            if (option_value == "true") {
+                show_wdl = true;
+            } else if (option_value == "false") {
+                show_wdl = false;
+            }
+        } else if (option_name == "Move Overhead") {
+            int overhead = atoi(option_value.c_str());
+            time_man->set_overhead(overhead);
+        } else if (option_name == "Ponder") {
+            if (option_value == "true") {
+                ponder = true;
+            } else if (option_value == "false") {
+                ponder = false;
+            }
         }
+    } else {
+        std::lock_guard<std::mutex> guard(non_uci_cmds_lock);
+
+        non_uci_cmds.push(cmd_line);
     }
 }
 
 
-void uci_interface::send_info_strings(int search_time)
+
+bool uci_interface::get_non_uci_cmd(std::string &str)
 {
-    int latest_depth = search_instance->get_depth();
+    std::lock_guard<std::mutex> guard(non_uci_cmds_lock);
+
+    if (!non_uci_cmds.empty()) {
+        str = non_uci_cmds.front();
+        non_uci_cmds.pop();
+
+        return true;
+    }
+    return false;
+}
+
+void uci_interface::iteration_end()
+{
+    int latest_depth = search_man->get_depth();
     if (latest_depth != last_info_depth) {
 
         int hashfull = search_instance->get_transpostion_table_usage_permill();
         int multi_pv = search_instance->get_multi_pv();
-        uint64_t nps = search_instance->get_nps();
+        uint64_t nps = search_man->get_nps();
 
         for (int i = last_info_depth+1; i <= latest_depth; i++) {
-            search_info info = search_instance->get_search_info(i);
+            search_result info = search_man->get_search_result(i);
 
             for (int j = 0; j < multi_pv; j++) {
                 int32_t eval = scale_eval(info.lines[j]->score);
@@ -358,6 +406,15 @@ void uci_interface::send_info_strings(int search_time)
                     ss << eval;
                 }
 
+                if (show_wdl) {
+                    ss << " wdl ";
+
+                    float w, d, l;
+                    wdl_model::get_wdl(game_instance->get_state(), info.lines[j]->score, w, d, l);
+                    ss << (int)(w*1000) << " ";
+                    ss << (int)(d*1000) << " ";
+                    ss << (int)(l*1000);
+                }
 
                 ss << " nodes ";
                 ss << info.nodes;
@@ -368,7 +425,7 @@ void uci_interface::send_info_strings(int search_time)
                 ss << hashfull;
 
                 ss << " time ";
-                ss << search_time;
+                ss << info.time_ms;
                 ss << " pv";
 
                 for (int k = 0; k < info.lines[j]->num_of_moves; k++) {
@@ -384,53 +441,15 @@ void uci_interface::send_info_strings(int search_time)
     }
 }
 
-
-void uci_interface::update()
+void uci_interface::search_end()
 {
-    if (!ginfo.active) {
-        return;
-    }
-
-    int search_time = search_instance->get_search_time_ms();
-
-    send_info_strings(search_time);
-
-
-    if (search_instance->is_ready_to_stop()) {
-        search_instance->stop_search();
-
-        send_info_strings(search_time);
-
-        send_command("bestmove " + search_instance->get_move().to_uci());
-        ginfo.active = false;
-
-        return;
-    }
-
-
-    if (ginfo.type == GO_MOVETIME && search_time >= ginfo.movetime) {
-        search_instance->stop_search();
-
-        send_command("bestmove " + search_instance->get_move().to_uci());
-        ginfo.active = false;
-
+    if (ponder) {
+        pv_table pv;
+        search_man->get_pv(pv);
+        send_command("bestmove " + pv.moves[0].to_uci() + (pv.num_of_moves > 2 ? " ponder " + pv.moves[1].to_uci() : ""));
+    } else {
+        send_command("bestmove " + search_man->get_move().to_uci());
     }
 }
-
-
-void uci_interface::main_loop()
-{
-    while (running) {
-        std::this_thread::sleep_for (std::chrono::milliseconds(1));
-
-        std::string cmd;
-        if (get_command(cmd)) {
-            execute_command(cmd);
-        } else {
-            update();
-        }
-    }
-}
-
 
 

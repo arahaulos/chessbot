@@ -197,6 +197,19 @@ struct bitboard_utility {
 
         return (rook_style | bishop_style);
     }
+
+    inline bitboard get_bishop_pattern(uint_fast8_t square_index) {
+        return bishop_pattern[square_index].pattern;
+    }
+
+    inline bitboard get_rook_pattern(uint_fast8_t square_index) {
+        return rook_pattern[square_index].pattern;
+    }
+
+    inline bitboard get_queen_pattern(uint_fast8_t square_index) {
+        return get_bishop_pattern(square_index) | get_rook_pattern(square_index);
+    }
+
 private:
     void init_knight_tables();
     void init_pawn_tables(bool black);

@@ -9,6 +9,7 @@
 #include <iomanip>
 
 #include "misc.hpp"
+#include "../search_manager.hpp"
 
 
 struct datagen_worker
@@ -23,12 +24,13 @@ struct datagen_worker
         avg_start_pos_abs_eval = 0.0f;
         avg_opening_branching_factor = 0.0f;
 
-        bot = std::make_unique<alphabeta_search>();
+        search = std::make_unique<searcher>();
+        sman = std::make_shared<search_manager>();
     }
 
     void wait()
     {
-        bot->abort_fast_search();
+        sman->stop_search();
         t.join();
     }
 
@@ -44,7 +46,8 @@ struct datagen_worker
 private:
     void play(std::atomic<int> &games, int d, int n, std::shared_ptr<nnue_weights> weights, std::shared_ptr<std::vector<std::string>> openings, bool multi_pv_opening, int opening_moves);
 
-    std::unique_ptr<alphabeta_search> bot;
+    std::unique_ptr<searcher> search;
+    std::shared_ptr<search_manager> sman;
 
     std::thread t;
     int worker_id;
@@ -55,7 +58,7 @@ void datagen_worker::play(std::atomic<int> &games, int d, int n, std::shared_ptr
 {
     std::srand((size_t)time(NULL) + worker_id);
 
-    bot->set_shared_weights(weights);
+    search->set_shared_weights(weights);
 
 
     game_state game;
@@ -69,7 +72,7 @@ void datagen_worker::play(std::atomic<int> &games, int d, int n, std::shared_ptr
     while (games > 0) {
         game.reset();
         game.get_state().load_fen((*openings)[rand()%openings->size()]);
-        bot->new_game();
+        search->new_game();
 
         std::vector<position_evaluation> game_positions;
 
@@ -83,6 +86,7 @@ void datagen_worker::play(std::atomic<int> &games, int d, int n, std::shared_ptr
         int moves = 0;
 
         while (true) {
+            sman->prepare_depth_nodes_search(d, n);
             if (random_moves > 0) {
                 std::vector<chess_move> acceptable_moves;
                 if (!multi_pv_opening) {
@@ -91,16 +95,16 @@ void datagen_worker::play(std::atomic<int> &games, int d, int n, std::shared_ptr
                     constexpr int multipv = 5;
                     constexpr int max_cp_loss = 120;
 
-                    if (bot->get_multi_pv() != multipv) {
-                        bot->set_multi_pv(multipv);
+                    if (search->get_multi_pv() != multipv) {
+                        search->set_multi_pv(multipv);
                     }
-                    bot->fast_search(game.get_state(), d/2, n);
+                    search->search(game.get_state(), sman);
 
-                    int32_t best_score = bot->get_evaluation();
+                    int32_t best_score = sman->get_evaluation();
 
                     for (int i = 0; i < multipv; i++) {
                         pv_table pv;
-                        bot->get_pv(pv, i);
+                        sman->get_pv(pv, i);
 
                         if (pv.num_of_moves > 0 && std::abs(pv.score - best_score) < max_cp_loss) {
                             acceptable_moves.push_back(pv.moves[0]);
@@ -120,8 +124,8 @@ void datagen_worker::play(std::atomic<int> &games, int d, int n, std::shared_ptr
                 }
 
             } else {
-                if (bot->get_multi_pv() != 1) {
-                    bot->set_multi_pv(1);
+                if (search->get_multi_pv() != 1) {
+                    search->set_multi_pv(1);
                 }
 
 
@@ -129,9 +133,11 @@ void datagen_worker::play(std::atomic<int> &games, int d, int n, std::shared_ptr
                 int32_t score;
                 int depth;
 
-                mov = bot->fast_search(game.get_state(), d, n);
-                score = bot->get_evaluation();
-                depth = bot->get_depth();
+                search->search(game.get_state(), sman);
+
+                mov = sman->get_move();
+                score = sman->get_evaluation();
+                depth = sman->get_depth();
 
                 if (is_mate_score(score) && mate_found_win == NO_WIN) {
                     if ((game.get_state().get_turn() == BLACK && score < 0) ||
@@ -202,7 +208,7 @@ void training_datagen::datagen(std::string output_file, std::string nnue_file, i
                            << "\nOutput file: " << output_file
                            << "\nNNUE: " << (nnue_file != "" ? nnue_file : "embedded") << std::endl;
 
-    std::shared_ptr<nnue_weights> weights = std::make_shared<nnue_weights>();
+    std::shared_ptr<nnue_weights> weights = nnue_weights::get_shared_weights();
     std::shared_ptr<std::vector<std::string>> openings = std::make_shared<std::vector<std::string>>();
 
     if (opening_suite != "") {

@@ -32,6 +32,8 @@ size_t match_str(size_t pos, std::string &str, const std::string &token)
 
 chess_move pgn_parser::parse_san(const board_state &state, std::string san)
 {
+    san.erase(std::remove_if(san.begin(), san.end(), [](unsigned char c) { return !std::isprint(c); }), san.end());
+
     std::vector<chess_move> legal_moves = state.get_all_legal_moves(state.get_turn());
 
     if (san.find("0-0-0") != std::string::npos || san.find("O-O-O") != std::string::npos) {
@@ -82,7 +84,6 @@ chess_move pgn_parser::parse_san(const board_state &state, std::string san)
     to_sq.from_uci(san.substr(san.length() - 2, 2));
 
     san.erase(san.length()-2, 2);
-
 
     std::string files = "abcdefgh";
     std::string ranks = "87654321";

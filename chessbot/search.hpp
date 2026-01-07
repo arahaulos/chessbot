@@ -1,6 +1,5 @@
 #pragma once
 
-
 #include "game.hpp"
 
 #include "zobrist.hpp"
@@ -9,15 +8,15 @@
 #include <memory>
 #include <thread>
 #include <mutex>
-#include <map>
 #include <atomic>
-#include <chrono>
+
 #include "state.hpp"
 #include "transposition.hpp"
 #include "defs.hpp"
 #include "history.hpp"
 #include "movepicker.hpp"
-#include "timeman.hpp"
+
+struct search_manager;
 
 struct search_params
 {
@@ -126,93 +125,6 @@ struct search_params
     }
 };
 
-struct search_statistics
-{
-    search_statistics() {
-        reset();
-    }
-
-    void reset() {
-        memset((void*)this, 0, sizeof(*this));
-    }
-
-    void add(const search_statistics &other) {
-        nodes += other.nodes;
-        cache_hits += other.cache_hits;
-        cache_misses += other.cache_misses;
-
-        fail_high_index += other.fail_high_index;
-        fail_highs += other.fail_highs;
-
-        eval_cache_hits += other.eval_cache_hits;
-        eval_cache_misses += other.eval_cache_misses;
-
-        history_score_samples += other.history_score_samples;
-
-        for (int i = 0; i < 32; i++) {
-            history_buckets[i] += other.history_buckets[i];
-        }
-
-        max_distance_to_root = std::max(max_distance_to_root, other.max_distance_to_root);
-    }
-
-    void add_history_sample(int64_t score)
-    {
-        int min_hist = -16000;
-        int max_hist = 16000;
-
-        int step = (max_hist - min_hist)/32;
-
-        int treshold = min_hist + step;
-        for (int i = 0; i < 32; i++) {
-            if (score < treshold) {
-                history_buckets[i] += 1;
-                return;
-            }
-            treshold = treshold + step;
-        }
-        history_buckets[31] += 1;
-    }
-
-    void print_history_distribution()
-    {
-        int min_hist = -16000;
-        int max_hist = 16000;
-
-        int step = (max_hist - min_hist)/32;
-
-        std::cout << step << std::endl;
-
-        int treshold = min_hist + step;
-
-        int64_t total_samples = 0;
-        for (int i = 0; i < 32; i++) {
-            total_samples += history_buckets[i];
-        }
-
-        for (int i = 0; i < 32; i++) {
-            std::cout << " < " << treshold << ": " << (double)history_buckets[i]*100 / total_samples << "%" << std::endl;
-            treshold = treshold + step;
-        }
-    }
-
-
-    int64_t nodes;
-    int64_t cache_hits;
-    int64_t cache_misses;
-
-    int64_t eval_cache_hits;
-    int64_t eval_cache_misses;
-
-    int64_t fail_high_index;
-    int64_t fail_highs;
-
-    int64_t history_score_samples;
-    int64_t history_buckets[32];
-
-    int max_distance_to_root;
-};
-
 struct pv_table
 {
     pv_table()
@@ -253,15 +165,43 @@ struct pv_table
     }
 };
 
-struct search_info
+struct search_statistics
 {
-    int depth;
-    int seldepth;
+    search_statistics() {
+        reset();
+    }
 
-    std::vector<std::shared_ptr<pv_table>> lines;
-    uint64_t time_ms;
-    uint64_t nodes;
+    void reset() {
+        memset((void*)this, 0, sizeof(*this));
+    }
+
+    void add(const search_statistics &other) {
+        nodes += other.nodes;
+        cache_hits += other.cache_hits;
+        cache_misses += other.cache_misses;
+
+        fail_high_index += other.fail_high_index;
+        fail_highs += other.fail_highs;
+
+        eval_cache_hits += other.eval_cache_hits;
+        eval_cache_misses += other.eval_cache_misses;
+
+        max_distance_to_root = std::max(max_distance_to_root, other.max_distance_to_root);
+    }
+
+    int64_t nodes;
+    int64_t cache_hits;
+    int64_t cache_misses;
+
+    int64_t eval_cache_hits;
+    int64_t eval_cache_misses;
+
+    int64_t fail_high_index;
+    int64_t fail_highs;
+
+    int max_distance_to_root;
 };
+
 
 struct search_context
 {
@@ -280,7 +220,7 @@ struct search_context
         }
     }
 
-    void presearch(board_state &state_to_search) {
+    void presearch(const board_state &state_to_search) {
         //history.reset();
         history.reset_killers();
         stats.reset();
@@ -321,17 +261,13 @@ struct search_context
 };
 
 
-class alphabeta_search
+class searcher
 {
 public:
-    alphabeta_search();
-    ~alphabeta_search();
-    alphabeta_search(const alphabeta_search &other);
+    searcher();
+    searcher(const searcher &other);
 
-    void load_nnue_net(std::string path)
-    {
-        shared_nnue_weights->load(path);
-    }
+    void search(const board_state &state, std::shared_ptr<search_manager> m);
 
     void set_shared_weights(std::shared_ptr<nnue_weights> weights) {
         shared_nnue_weights = weights;
@@ -340,24 +276,8 @@ public:
         }
     }
 
-    void set_nnue_rescaling(int f0, int f1) {
-        shared_nnue_weights->rescale_factor0 = f0;
-        shared_nnue_weights->rescale_factor1 = f1;
-    }
-
-    uint64_t get_search_time_ms();
-
-
     void new_game();
 
-
-    void begin_search(const board_state &state, std::shared_ptr<time_manager> tman);
-
-    void begin_search(const board_state &state) {
-        begin_search(state, nullptr);
-    }
-
-    void stop_search();
     void set_multi_pv(int num) {
         num_of_pvs = num;
     }
@@ -367,125 +287,20 @@ public:
 
     void clear_transposition_table();
     void clear_evaluation_cache();
+    void clear_history();
 
     int32_t get_transpostion_table_usage_permill();
 
-    uint64_t get_node_count() {
-        int n = 0;
-        info_lock.lock();
-        if (search_infos.size() > 0) {
-            n = search_infos.back().nodes;
-        }
-        info_lock.unlock();
-        return n;
-    }
-
-    int get_max_depth_reached() {
-        int sd = 0;
-        info_lock.lock();
-        if (search_infos.size() > 0) {
-            sd = search_infos.back().seldepth;
-        }
-        info_lock.unlock();
-        return sd;
-    }
-
-    chess_move get_move(int pv_num)
-    {
-        chess_move p = chess_move::null_move();
-        info_lock.lock();
-        if (search_infos.size() > 0) {
-            p = search_infos.back().lines[pv_num]->moves[0];
-        }
-        info_lock.unlock();
-        return p;
-    }
-
-    int32_t get_evaluation(int pv_num)
-    {
-        int32_t e = 0;
-        info_lock.lock();
-        if (search_infos.size() > 0) {
-            e = search_infos.back().lines[pv_num]->score;
-        }
-        info_lock.unlock();
-        return e;
-    }
-
-    void get_pv(pv_table &pv_out, int pv_num)
-    {
-        info_lock.lock();
-        if (search_infos.size() > 0) {
-            pv_out = *search_infos.back().lines[pv_num];
-        }
-        info_lock.unlock();
-    }
-
-    int32_t get_depth()
-    {
-        info_lock.lock();
-        int depth = 0;
-        if (search_infos.size() > 0) {
-            depth = search_infos.back().depth;
-        }
-        info_lock.unlock();
-        return depth;
-    }
-
-    void limit_search(int depth, int nodes)
-    {
-        min_depth = depth;
-        limit_nodes = nodes;
-    }
-
-
-    chess_move get_move() {
-        return get_move(0);
-    }
-    int32_t get_evaluation() {
-        return get_evaluation(0);
-    }
-    void get_pv(pv_table &pv_out)  {
-        get_pv(pv_out, 0);
-    }
-
-    uint64_t get_nps() {
-        return nps;
-    }
-
-    bool is_searching() {
-        return searching_flag;
-    }
-    bool is_ready_to_stop() {
-        return ready_flag;
-    }
-
-    search_info get_search_info(int depth)
-    {
-        search_info info;
-        info_lock.lock();
-        info = search_infos[depth-1];
-        info_lock.unlock();
-        return info;
-    }
-
     bool test_flag;
-
-    chess_move fast_search(board_state &state, int depth, int max_nodes);
-    void abort_fast_search()  {
-        searching_flag = false;
-        alphabeta_abort_flag = true;
-    }
-    chess_move search_time(board_state &state, uint64_t max_time_ms, std::shared_ptr<time_manager> tman);
 
     void set_threads(int num_of_threads);
     void set_transposition_table_size_MB(int size_MB);
 
     search_params sp;
 private:
-    int32_t static_evaluation(const board_state &state, player_type_t player, search_statistics &stats);
+    uint64_t get_total_node_count();
 
-    void iterative_search(int max_depth);
+    int32_t static_evaluation(const board_state &state, player_type_t player, search_statistics &stats);
     void start_helper_threads(int32_t window_alpha, int32_t window_beta, int depth);
     void stop_helper_threads();
     void aspirated_search(int depth);
@@ -494,22 +309,13 @@ private:
     int32_t alphabeta(board_state &state, int32_t alpha, int32_t beta, int depth, int ply, search_context &sc, pv_table &pv, chess_move *skip_move, node_type_t expected_node_type);
     int32_t quisearch(board_state &state, int32_t alpha, int32_t beta, int depth, int ply, search_context &sc, bool is_pv);
 
-
     int number_of_helper_threads;
     int nominal_search_depth;
     uint32_t current_cache_age;
 
-    uint64_t nps;
-
-    std::chrono::high_resolution_clock::time_point search_begin_time;
-
     cache<tt_bucket, TT_SIZE> transposition_table;
     cache<eval_cache_bucket, EVAL_CACHE_SIZE> eval_cache;
 
-    board_state state_to_search;
-
-
-    std::thread search_main_thread;
     std::vector<std::thread> helper_threads;
     std::vector<std::unique_ptr<search_context>> thread_datas;
 
@@ -519,18 +325,11 @@ private:
 
     std::atomic<bool> searching_flag;
     std::atomic<bool> alphabeta_abort_flag;
-    std::atomic<bool> ready_flag;
 
     search_statistics all_threads_stats;
 
     std::vector<std::pair<chess_move, int32_t>> root_moves;
 
     std::shared_ptr<nnue_weights> shared_nnue_weights;
-    std::shared_ptr<time_manager> time_man;
-
-    int limit_nodes;
-    int min_depth;
-
-    std::mutex info_lock;
-    std::vector<search_info> search_infos;
+    std::shared_ptr<search_manager> manager;
 };

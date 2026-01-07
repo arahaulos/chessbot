@@ -27,13 +27,23 @@ struct nnue_weights
     nnue_layer_weights<layer1_neurons, layer2_neurons, layer_stack_size> layer2_weights;
     nnue_layer_weights<layer2_neurons, 1, layer_stack_size> output_weights;
 
-
     int rescale_factor0;
     int rescale_factor1;
 
     void load(std::string path);
     void save(std::string path);
+
+    static std::shared_ptr<nnue_weights> get_shared_weights() {
+        static std::shared_ptr<nnue_weights> shared_weights;
+        if (!shared_weights) {
+            std::cout << "Loading embedded weights... ";
+            shared_weights = std::make_shared<nnue_weights>();
+            std::cout << "done." << std::endl;
+        }
+        return shared_weights;
+    }
 };
+
 
 struct nnue_board_state
 {
@@ -126,7 +136,6 @@ struct nnue_network
     }
 
     std::shared_ptr<nnue_weights> weights;
-    bool test_flag;
 private:
     void reset_nnue();
 

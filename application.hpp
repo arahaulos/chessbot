@@ -26,6 +26,6 @@ private:
     uint64_t bench_position(std::string position_fen, int depth);
 
     std::shared_ptr<game_state> game;
-    std::shared_ptr<alphabeta_search> alphabeta;
+    std::shared_ptr<searcher> alphabeta;
     std::shared_ptr<uci_interface> uci;
 };

@@ -7,7 +7,7 @@
 constexpr int32_t TT_MAX_EVAL = std::numeric_limits<int16_t>::max() - 512;
 constexpr int32_t TT_MIN_EVAL = -TT_MAX_EVAL;
 
-constexpr int EVAL_CACHE_ENTRIES_PER_BUCKET = 4;
+constexpr int EVAL_CACHE_ENTRIES_PER_BUCKET = 8;
 constexpr int TT_ENTRIES_IN_BUCKET = 4;
 
 constexpr uint64_t EVAL_CACHE_KEY_BITS = 0xFFFFFFFFFFFF0000ull;
@@ -107,7 +107,6 @@ struct tt_entry
     {
         data = 0;
         key = 0;
-        static_eval_type = 0x7FFF;
     }
 
     int get_depth() const {
@@ -120,9 +119,10 @@ struct tt_entry
         int depth = (int)(age_depth & 0x7f);
         int type = static_eval_type & 0x3;
 
-        if (current_cache_age >= age + 2) {
+        if (std::abs((current_cache_age & 0x1ff) - age) > 1 || type == 0) {
             return -1;
         }
+
         if (type == PV_NODE) {
             return depth + 2;
         } else if (type == CUT_NODE) {
@@ -132,7 +132,12 @@ struct tt_entry
         }
     }
 
-    bool is_valid(const uint64_t zhash) const {
+    void overwrite_age(const uint64_t &zhash, int new_age) {
+        age_depth = ((new_age & 0x1ff) << 7) | (age_depth & 0x7f);
+        key = zhash ^ data;
+    }
+
+    bool is_valid(const uint64_t &zhash) const {
         return ((zhash ^ data) == key);
     }
 
@@ -192,7 +197,10 @@ struct tt_bucket
     int used(int current_cache_age) {
         int used = 0;
         for (int i = 0; i < TT_ENTRIES_IN_BUCKET; i++) {
-            if (((entries[i].age_depth >> 7) + 2) > current_cache_age && entries[i].static_eval_type != 0x7FFF) {
+            int age = (int)(entries[i].age_depth >> 7);
+            int type = entries[i].static_eval_type & 0x3;
+
+            if (std::abs((current_cache_age & 0x1ff) - age) < 2 && type != 0) {
                 used++;
             }
         }

@@ -8,7 +8,7 @@
 #include <atomic>
 #include <iomanip>
 #include "misc.hpp"
-#include "../timeman.hpp"
+#include "../time_manager.hpp"
 
 
 inline double sprt_llr(double elo0, double elo1, int wins, int draws, int losses)
@@ -51,10 +51,10 @@ struct test_worker
         t.join();
     }
 
-    void start(std::atomic<int> &games, int time, int time_inc, alphabeta_search &bot00, alphabeta_search &bot10, std::shared_ptr<std::vector<std::string>> opening_suite)
+    void start(std::atomic<int> &games, int time, int time_inc, searcher &s00, searcher &s10, std::shared_ptr<std::vector<std::string>> opening_suite)
     {
-        bot0 = std::make_unique<alphabeta_search>(bot00);
-        bot1 = std::make_unique<alphabeta_search>(bot10);
+        s0 = std::make_unique<searcher>(s00);
+        s1 = std::make_unique<searcher>(s10);
 
         t = std::thread(&test_worker::play, this, std::ref(games), time, time_inc, opening_suite);
     }
@@ -65,7 +65,7 @@ private:
     {
         std::srand((size_t)time(NULL) + worker_id);
 
-        bool bot0_playing_black = (worker_id & 0x1);
+        bool s0_playing_black = (worker_id & 0x1);
 
         match_stats mstats;
 
@@ -73,29 +73,29 @@ private:
             std::string opening_fen = (*opening_suite)[rand() % opening_suite->size()];
 
 
-            play_game_pair(*bot0, *bot1, opening_fen, base_time, time_inc, bot0_playing_black, mstats);
+            play_game_pair(*s0, *s1, opening_fen, base_time, time_inc, s0_playing_black, mstats);
 
-            bot0_playing_black = !bot0_playing_black;
+            s0_playing_black = !s0_playing_black;
             stats = mstats;
             games -= 2;
         }
     }
 
-    std::unique_ptr<alphabeta_search> bot0;
-    std::unique_ptr<alphabeta_search> bot1;
+    std::unique_ptr<searcher> s0;
+    std::unique_ptr<searcher> s1;
 
     std::thread t;
     int worker_id;
 };
 
 
-void get_test_workers_results(std::vector<test_worker> &workers, double &bot0_depth, double &bot1_depth, double &bot0_nps, double &bot1_nps, double &elo, int &wins, int &draws, int &losses)
+void get_test_workers_results(std::vector<test_worker> &workers, double &s0_depth, double &s1_depth, double &s0_nps, double &s1_nps, double &elo, int &wins, int &draws, int &losses)
 {
-    int bot0_moves = 0;
-    int bot1_moves = 0;
+    int s0_moves = 0;
+    int s1_moves = 0;
 
-    bot0_depth = 0;
-    bot1_depth = 0;
+    s0_depth = 0;
+    s1_depth = 0;
 
     wins = 0;
     draws = 0;
@@ -106,28 +106,28 @@ void get_test_workers_results(std::vector<test_worker> &workers, double &bot0_de
         losses += workers[i].stats.losses;
         draws += workers[i].stats.draws;
 
-        bot0_depth += workers[i].stats.bot0_depth;
-        bot1_depth += workers[i].stats.bot1_depth;
+        s0_depth += workers[i].stats.s0_depth;
+        s1_depth += workers[i].stats.s1_depth;
 
-        bot0_moves += workers[i].stats.bot0_moves;
-        bot1_moves += workers[i].stats.bot1_moves;
+        s0_moves += workers[i].stats.s0_moves;
+        s1_moves += workers[i].stats.s1_moves;
 
-        bot0_nps += workers[i].stats.bot0_nps;
-        bot1_nps += workers[i].stats.bot1_nps;
+        s0_nps += workers[i].stats.s0_nps;
+        s1_nps += workers[i].stats.s1_nps;
     }
 
-    if (bot0_moves > 0 && bot1_moves > 0) {
-        bot0_depth /= bot0_moves;
-        bot1_depth /= bot1_moves;
+    if (s0_moves > 0 && s1_moves > 0) {
+        s0_depth /= s0_moves;
+        s1_depth /= s1_moves;
 
-        bot0_nps /= bot0_moves;
-        bot1_nps /= bot1_moves;
+        s0_nps /= s0_moves;
+        s1_nps /= s1_moves;
     } else {
-        bot0_depth = 0;
-        bot1_depth = 0;
+        s0_depth = 0;
+        s1_depth = 0;
 
-        bot0_nps = 0;
-        bot1_nps = 0;
+        s0_nps = 0;
+        s1_nps = 0;
     }
 
     if (wins+losses+draws > 1) {
@@ -139,7 +139,7 @@ void get_test_workers_results(std::vector<test_worker> &workers, double &bot0_de
 
 
 
-int testing_utility::test(int games, int time, int time_inc, alphabeta_search &bot0, alphabeta_search &bot1, int threads, std::string opening_suite, double elo0, double elo1, double alpha, double beta)
+int testing_utility::test(int games, int time, int time_inc, searcher &s0, searcher &s1, int threads, std::string opening_suite, double elo0, double elo1, double alpha, double beta)
 {
     std::shared_ptr<std::vector<std::string>> openings = nullptr;
     if (opening_suite != "") {
@@ -150,10 +150,10 @@ int testing_utility::test(int games, int time, int time_inc, alphabeta_search &b
     std::vector<test_worker> workers(threads);
 
     for (size_t i = 0; i < workers.size(); i++) {
-        workers[i].start(agames, time, time_inc, bot0, bot1, openings);
+        workers[i].start(agames, time, time_inc, s0, s1, openings);
     }
 
-    double bot0_depth, bot1_depth, bot0_nps, bot1_nps, elo;
+    double s0_depth, s1_depth, s0_nps, s1_nps, elo;
     int wins, draws, losses;
 
     double lower = std::log(beta / (1 - alpha));
@@ -170,12 +170,12 @@ int testing_utility::test(int games, int time, int time_inc, alphabeta_search &b
     std::cout << "Playing " << games << " games with " << (float)time/1000.0f << "s + " << time_inc << "ms" << " time control.  Threads: " << threads << std::endl;
 
     while (agames > 0) {
-        get_test_workers_results(workers, bot0_depth, bot1_depth, bot0_nps, bot1_nps, elo, wins, draws, losses);
+        get_test_workers_results(workers, s0_depth, s1_depth, s0_nps, s1_nps, elo, wins, draws, losses);
 
         double llr = sprt_llr(elo0, elo1, wins, draws, losses);
 
-        std::cout << "\rD: "    << std::left << std::setw(8) << bot0_depth << " " << std::setw(8) << bot1_depth
-                  << "  Knps: " << std::setw(8) << bot0_nps << " " << std::setw(8) << bot1_nps
+        std::cout << "\rD: "    << std::left << std::setw(8) << s0_depth << " " << std::setw(8) << s1_depth
+                  << "  Knps: " << std::setw(8) << s0_nps << " " << std::setw(8) << s1_nps
                   << "  G: "    << games - agames << "/" << games
                   << "  R: "    << wins << "/" << draws << "/" << losses
                   << "  Elo: "  << elo
@@ -194,7 +194,7 @@ int testing_utility::test(int games, int time, int time_inc, alphabeta_search &b
         workers[i].wait();
     }
 
-    get_test_workers_results(workers, bot0_depth, bot1_depth, bot0_nps, bot1_nps, elo, wins, draws, losses);
+    get_test_workers_results(workers, s0_depth, s1_depth, s0_nps, s1_nps, elo, wins, draws, losses);
 
     int total = wins + draws + losses;
 
@@ -206,10 +206,10 @@ int testing_utility::test(int games, int time, int time_inc, alphabeta_search &b
 
     std::cout << "Elo: " << elo << std::endl;
 
-    std::cout << "Depth0: " << bot0_depth << std::endl;
-    std::cout << "Depth1: " << bot1_depth << std::endl;
-    std::cout << "Knps0: " << bot0_nps << std::endl;
-    std::cout << "Knps1: " << bot1_nps << std::endl;
+    std::cout << "Depth0: " << s0_depth << std::endl;
+    std::cout << "Depth1: " << s1_depth << std::endl;
+    std::cout << "Knps0: " << s0_nps << std::endl;
+    std::cout << "Knps1: " << s1_nps << std::endl;
 
     return elo;
 }

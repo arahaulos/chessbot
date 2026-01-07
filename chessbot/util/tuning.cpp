@@ -219,11 +219,11 @@ struct tuner_worker
     void tuner_thread(int base_time, int time_inc, int N) {
         std::srand(time(NULL) + worker_id);
 
-        alphabeta_search bot0;
-        alphabeta_search bot1;
+        searcher s0;
+        searcher s1;
 
-        bot0.set_threads(1);
-        bot1.set_threads(1);
+        s0.set_threads(1);
+        s1.set_threads(1);
 
         match_stats stats;
 
@@ -259,13 +259,13 @@ struct tuner_worker
             for (std::string &param_name : params_to_tune) {
                 int i = search_params::get_variable_index(param_name);
 
-                bot0.sp.data[i] = std::round(params0[i]);
-                bot1.sp.data[i] = std::round(params1[i]);
+                s0.sp.data[i] = std::round(params0[i]);
+                s1.sp.data[i] = std::round(params1[i]);
             }
 
             std::string opening_fen = (*openings)[rand() % openings->size()];
 
-            return play_game_pair(bot0, bot1, opening_fen, base_time, time_inc, rand()&0x1, stats);
+            return play_game_pair(s0, s1, opening_fen, base_time, time_inc, rand()&0x1, stats);
 
             //return test_model.simulate_match(params0, params1, 0.5, 2);
         };
@@ -446,12 +446,12 @@ void tuning_utility::tune_search_params(int time, int time_inc, int threads, int
 
     workers.clear();
 
-    alphabeta_search bot0, bot1;
+    searcher s0, s1;
     for (int i = 0; i < default_params.num_of_params(); i++) {
-        bot0.sp.data[i] = (int)std::round((*params)[i]);
+        s0.sp.data[i] = (int)std::round((*params)[i]);
     }
 
-    int elo = testing_utility::test(1000, time, time_inc, bot0, bot1, threads, opening_suite);
+    int elo = testing_utility::test(1000, time, time_inc, s0, s1, threads, opening_suite);
 
     std::ofstream file("search_tuning.txt", std::ios::app);
     if (file.is_open()) {

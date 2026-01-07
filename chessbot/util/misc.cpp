@@ -1,46 +1,56 @@
 #include "misc.hpp"
 #include <fstream>
 #include <cmath>
+#include "../search_manager.hpp"
 
-int play_game_pair(alphabeta_search &bot0, alphabeta_search &bot1, const std::string &opening_fen, int base_time, int time_inc, bool bot0_playing_black, match_stats &stats)
+int play_game_pair(searcher &s0, searcher &s1, const std::string &opening_fen, int base_time, int time_inc, bool s0_playing_black, match_stats &stats)
 {
     game_state game;
 
     int score = 0;
 
+    std::shared_ptr<time_manager> tman = std::make_shared<time_manager>();
+    std::shared_ptr<search_manager> sman = std::make_shared<search_manager>();
+
     for (int i = 0; i < 2; i++) {
         game.reset();
         game.get_state().load_fen(opening_fen);
 
-        bot0.new_game();
-        bot1.new_game();
+        s0.new_game();
+        s1.new_game();
 
-        int bot0_time_left = base_time;
-        int bot1_time_left = base_time;
+        int s0_time_left = base_time;
+        int s1_time_left = base_time;
 
         while (true) {
             chess_move mov;
-            if ((bot0_playing_black && game.get_turn() == BLACK) || (!bot0_playing_black && game.get_turn() == WHITE)) {
-                int search_time = get_target_search_time(bot0_time_left, time_inc);
-                mov = bot0.search_time(game.get_state(), search_time, nullptr);
-                bot0_time_left = std::max(bot0_time_left - search_time, 0) + time_inc;
+            if ((s0_playing_black && game.get_turn() == BLACK) || (!s0_playing_black && game.get_turn() == WHITE)) {
+                tman->init(s0_time_left, time_inc);
+                sman->prepare_clock_search(tman);
 
-                stats.bot0_depth += bot0.get_depth();
-                stats.bot0_nps += bot0.get_nps() / 1000;
-                stats.bot0_moves += 1;
+                s0.search(game.get_state(), sman);
+                s0_time_left = std::max(s0_time_left - tman->get_time_used(), 0) + time_inc;
+
+                mov = sman->get_move();
+                stats.s0_depth += sman->get_depth();
+                stats.s0_nps += sman->get_nps() / 1000;
+                stats.s0_moves += 1;
             } else {
-                int search_time = get_target_search_time(bot1_time_left, time_inc);
-                mov = bot1.search_time(game.get_state(), search_time, nullptr);
-                bot1_time_left = std::max(bot1_time_left - search_time, 0) + time_inc;
+                tman->init(s1_time_left, time_inc);
+                sman->prepare_clock_search(tman);
 
-                stats.bot1_depth += bot1.get_depth();
-                stats.bot1_nps += bot1.get_nps() / 1000;
-                stats.bot1_moves += 1;
+                s1.search(game.get_state(), sman);
+                s1_time_left = std::max(s1_time_left - tman->get_time_used(), 0) + time_inc;
+
+                mov = sman->get_move();
+                stats.s1_depth += sman->get_depth();
+                stats.s1_nps += sman->get_nps() / 1000;
+                stats.s1_moves += 1;
             }
 
             game_win_type_t result = game.make_move(mov);
             if (result != NO_WIN) {
-                if ((result == BLACK_WIN && bot0_playing_black) || (result == WHITE_WIN && !bot0_playing_black)) {
+                if ((result == BLACK_WIN && s0_playing_black) || (result == WHITE_WIN && !s0_playing_black)) {
                     score += 1;
 
                     stats.wins += 1;
@@ -54,7 +64,7 @@ int play_game_pair(alphabeta_search &bot0, alphabeta_search &bot1, const std::st
                 break;
             }
         }
-        bot0_playing_black = !bot0_playing_black;
+        s0_playing_black = !s0_playing_black;
     }
 
     return score;

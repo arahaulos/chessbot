@@ -23,6 +23,8 @@ struct position_evaluation
 struct selfplay_result
 {
     //fen;bestmove;score;wdl
+    selfplay_result() {};
+
 
     selfplay_result(const std::string &p, const std::string &best_move, int32_t score, float w)
     {
@@ -75,14 +77,14 @@ struct match_stats
         losses = 0;
         draws = 0;
 
-        bot0_depth = 0;
-        bot1_depth = 0;
+        s0_depth = 0;
+        s1_depth = 0;
 
-        bot0_nps = 0;
-        bot1_nps = 0;
+        s0_nps = 0;
+        s1_nps = 0;
 
-        bot0_moves = 0;
-        bot1_moves = 0;
+        s0_moves = 0;
+        s1_moves = 0;
     }
 
 
@@ -90,15 +92,15 @@ struct match_stats
     int losses;
     int draws;
 
-    int bot0_depth;
-    int bot1_depth;
+    int s0_depth;
+    int s1_depth;
 
-    int64_t bot0_nps;
-    int64_t bot1_nps;
+    int64_t s0_nps;
+    int64_t s1_nps;
 
-    int bot0_moves;
-    int bot1_moves;
+    int s0_moves;
+    int s1_moves;
 };
 
 
-int play_game_pair(alphabeta_search &bot0, alphabeta_search &bot1, const std::string &opening_fen, int base_time, int time_inc, bool bot0_playing_black, match_stats &stats);
+int play_game_pair(searcher &s0, searcher &s1, const std::string &opening_fen, int base_time, int time_inc, bool s0_playing_black, match_stats &stats);

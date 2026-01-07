@@ -633,7 +633,7 @@ public:
     uint64_t structure_hash;
 
     void recalculate_bitboards();
-    void recalculate_piece_counter();
+    void recalculate_hashes();
     bool validate_bitboards() const;
 
 
@@ -653,7 +653,6 @@ public:
     square_index en_passant_target_square;
     uint16_t half_move_clock;
     uint32_t material_conf;
-
 private:
     void push_hash_stack(uint64_t zhash, bool irreversible)
     {

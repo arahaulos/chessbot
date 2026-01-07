@@ -230,9 +230,7 @@ void board_state::init_clear()
     }
 
     recalculate_bitboards();
-
-    zhash = hashgen.get_hash(*this, get_turn());
-    structure_hash = hashgen.get_structure_hash(*this, get_turn());
+    recalculate_hashes();
 }
 
 void board_state::set_initial_state()
@@ -400,9 +398,7 @@ void board_state::load_fen(std::string fen_str)
     }
 
     recalculate_bitboards();
-
-    zhash = hashgen.get_hash(*this, get_turn());
-    structure_hash = hashgen.get_structure_hash(*this, get_turn());
+    recalculate_hashes();
 }
 
 
@@ -483,8 +479,11 @@ std::string board_state::generate_fen() const
     return ss.str();
 }
 
-
-
+void board_state::recalculate_hashes()
+{
+    zhash = hashgen.get_hash(*this, get_turn());
+    structure_hash = hashgen.get_structure_hash(*this, get_turn());
+}
 
 void board_state::recalculate_bitboards()
 {

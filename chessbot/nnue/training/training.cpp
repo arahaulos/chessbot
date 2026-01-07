@@ -70,7 +70,7 @@ void init_weights(training_weights &weights, bool init_perspectives_weights)
     }
 }
 
-void back_propagate(training_network &net, training_weights &grad, float loss_delta, player_type_t stm)
+void back_propagate(training_network &net, training_weights &grad, float loss_delta, player_type_t stm, bool freeze_perspective)
 {
     net.output_layer.grads[0] = loss_delta;
 
@@ -83,8 +83,10 @@ void back_propagate(training_network &net, training_weights &grad, float loss_de
         net.layer1.back_propagate(net.output_bucket, &grad.layer1_weights, net.black_side.grads, net.white_side.grads, net.black_side.neurons, net.white_side.neurons);
     }
 
-    net.white_side.back_propagate(&grad.perspective_weights);
-    net.black_side.back_propagate(&grad.perspective_weights);
+    if (!freeze_perspective) {
+        net.white_side.back_propagate(&grad.perspective_weights);
+        net.black_side.back_propagate(&grad.perspective_weights);
+    }
 }
 
 
@@ -176,7 +178,10 @@ struct worker_thread
 
                     float num_of_pieces = pop_count(sample.occupation);
 
-                    float lambda = std::clamp(1.0f - ((num_of_pieces - 4.0f) / 16.0f), min_lambda, max_lambda);
+                    //float lambda = std::clamp(1.0f - ((num_of_pieces - 4.0f) / 16.0f), min_lambda, max_lambda);
+
+                    float lambda_weight = std::clamp((num_of_pieces - 4.0f)/28.0f, 0.0f, 1.0f);
+                    float lambda = lambda_weight*min_lambda + (1.0f-lambda_weight)*max_lambda;
 
                     float result = sample.get_wdl_relative_to_stm();
 
@@ -196,7 +201,7 @@ struct worker_thread
 
                     float sigmoid_delta = pred * (1.0f - pred);
 
-                    back_propagate(net, backprop_gradient, loss_delta*sigmoid_delta, sample.get_turn());
+                    back_propagate(net, backprop_gradient, loss_delta*sigmoid_delta, sample.get_turn(), freeze_perspective_weights);
 
                     cost += loss;
                 }
@@ -221,7 +226,9 @@ struct worker_thread
                 net.weights->layer2_weights.rmsprop(&corrected_first_moment->layer2_weights, &corrected_second_moment->layer2_weights, learning_rate, weight_decay, thread_id, pool_size);
                 net.weights->layer1_weights.rmsprop(&corrected_first_moment->layer1_weights, &corrected_second_moment->layer1_weights, learning_rate, weight_decay, thread_id, pool_size);
 
-                net.weights->perspective_weights.rmsprop(&corrected_first_moment->perspective_weights, &corrected_second_moment->perspective_weights, learning_rate, weight_decay, thread_id, pool_size);
+                if (!freeze_perspective_weights) {
+                    net.weights->perspective_weights.rmsprop(&corrected_first_moment->perspective_weights, &corrected_second_moment->perspective_weights, learning_rate, weight_decay, thread_id, pool_size);
+                }
             }
 
             thread_signal_ready();
@@ -229,7 +236,7 @@ struct worker_thread
     }
 
 
-    void start_backprop(training_position *data, int worker_batch_size, float min_l, float max_l, bool use_factorizer)
+    void start_backprop(training_position *data, int worker_batch_size, float min_l, float max_l, bool use_factorizer, bool freeze_perspective)
     {
         operation = WORK_BACKPROP;
 
@@ -237,6 +244,7 @@ struct worker_thread
         batch_size = worker_batch_size;
         min_lambda = min_l;
         max_lambda = max_l;
+        freeze_perspective_weights = freeze_perspective;
 
         net.use_factorizer = use_factorizer;
 
@@ -287,6 +295,8 @@ private:
 
     int thread_id;
     int pool_size;
+
+    bool freeze_perspective_weights;
 
     std::thread t;
     training_position *batch;
@@ -343,11 +353,11 @@ struct worker_thread_pool
     }
 
 
-    void step(training_position *batch, int batch_size, float min_lambda, float max_lambda, bool use_factorizer, float beta1, float beta2, float learning_rate, float weight_decay, float &avg_cost)
+    void step(training_position *batch, int batch_size, float min_lambda, float max_lambda, bool use_factorizer, bool freeze_perspective, float beta1, float beta2, float learning_rate, float weight_decay, float &avg_cost)
     {
         steps++;
 
-        std::for_each(threads.begin(), threads.end(), [batch, batch_size, use_factorizer, min_lambda, max_lambda] (auto p) {p->start_backprop(batch, batch_size, min_lambda, max_lambda, use_factorizer);});
+        std::for_each(threads.begin(), threads.end(), [batch, batch_size, use_factorizer, min_lambda, max_lambda, freeze_perspective] (auto p) {p->start_backprop(batch, batch_size, min_lambda, max_lambda, use_factorizer, freeze_perspective);});
         std::vector<training_weights*> grads_to_add;
         avg_cost = 0;
         for (size_t i = 0; i < threads.size(); i++) {
@@ -609,14 +619,16 @@ void training_loop(std::string net_file, std::string qnet_file, std::shared_ptr<
     worker_thread_pool thread_pool(16, weights, gradient, gradient_sq, first_moment, second_moment, corrected_first_moment, corrected_second_moment);
 
     bool use_factorized = true;
-    float learning_rate = 0.0002f;
-    float weight_decay = 0.001f;
+    float learning_rate = 0.0001f;
+    float weight_decay = 0.0001f;
     float beta1 = 0.9f;
     float beta2 = 0.999f;
-    int batch_size = 4000*thread_pool.get_pool_size();
+    int batch_size = 8000*thread_pool.get_pool_size();
     int epoch_size = 100000000;
     float min_lambda = 0.2f;
-    float max_lambda = 0.5f;
+    float max_lambda = 0.4f;
+
+    bool freeze_perspective = false;
 
     float learning_rate_decay = 0.98f;
 
@@ -640,7 +652,8 @@ void training_loop(std::string net_file, std::string qnet_file, std::shared_ptr<
     std::cout << "Max lambda: " << max_lambda << std::endl;
     std::cout << "Batch size: " << batch_size << std::endl;
     std::cout << "Epoch size: " << epoch_size << std::endl;
-    std::cout << "Threads: " << thread_pool.get_pool_size() << std::endl << std::endl;
+    std::cout << "Threads: " << thread_pool.get_pool_size() << std::endl;
+    std::cout << "Freeze perspective weights: " << freeze_perspective << std::endl << std::endl;
 
     while (true) {
         auto t1 = std::chrono::high_resolution_clock::now();
@@ -665,7 +678,7 @@ void training_loop(std::string net_file, std::string qnet_file, std::shared_ptr<
         }
 
 
-        thread_pool.step(batch_manager.get_current_batch(), batch_size, min_lambda, max_lambda, use_factorized, beta1, beta2, learning_rate, weight_decay, batch_cost);
+        thread_pool.step(batch_manager.get_current_batch(), batch_size, min_lambda, max_lambda, use_factorized, freeze_perspective, beta1, beta2, learning_rate, weight_decay, batch_cost);
 
         if (training_cost == 0.0f) {
             training_cost = batch_cost;
@@ -727,131 +740,6 @@ float nnue_trainer::find_scaling_factor_for_net(std::string qnet_file, std::vect
 
     return scaling_factor;
 }
-
-
-
-void nnue_trainer::optimize_quantized_net(std::string input_file, std::string output_file, std::vector<selfplay_result> &test_set)
-{
-    //Sorts neurons based on probability of activation
-
-    std::shared_ptr<nnue_weights> weights = std::make_shared<nnue_weights>();
-    std::shared_ptr<nnue_weights> optimized_weights = std::make_shared<nnue_weights>();
-    weights->load(input_file);
-    optimized_weights->load(input_file);
-
-    nnue_network nnue(weights);
-
-    constexpr int N = num_perspective_neurons;
-
-    std::vector<std::pair<int, int>> act;
-    for (int j = 0; j < N; j++) {
-        act.emplace_back(j, 0);
-    }
-
-    board_state state;
-
-    std::cout << "Evaluating..." << std::endl;
-    for (size_t i = 0; i < test_set.size(); i++) {
-        state.load_fen(test_set[i].fen);
-        nnue.evaluate(state);
-
-        int16_t *white_activations = nnue.get_perspective_activations(WHITE);
-        int16_t *black_activations = nnue.get_perspective_activations(BLACK);
-        for (int j = 0; j < N; j++) {
-            act[j].second += (white_activations[j] > 0);
-            act[j].second += (black_activations[j] > 0);
-        }
-    }
-
-
-    std::cout << "Activations" << std::endl;
-
-    for (int j = 0; j < N; j++) {
-        std::cout << j << ": " << std::setprecision(3) << ((double)act[j].second*50 / test_set.size()) << "%"  << std::endl;
-    }
-
-
-    std::cout << "Sorting neurons..." << std::endl;
-
-    std::sort(act.begin(), act.end(), [] (auto &a, auto &b) {return a.second > b.second;});
-
-    int16_t *src_persp_weights = weights->perspective_weights.weights;
-    int16_t *src_persp_biases = weights->perspective_weights.biases;
-
-    int16_t *dst_persp_weights = optimized_weights->perspective_weights.weights;
-    int16_t *dst_persp_biases = optimized_weights->perspective_weights.biases;
-
-    for (int i = 0; i < N; i++) {
-        int src_index = act[i].first;
-        int dst_index = i;
-
-        for (int j = 0; j < num_perspective_inputs; j++) {
-            dst_persp_weights[j * N + dst_index] = src_persp_weights[j * N + src_index];
-        }
-        dst_persp_biases[dst_index] = src_persp_biases[src_index];
-    }
-
-
-    for (int b = 0; b < layer_stack_size; b++) {
-        int16_t *src_layer_weights = &weights->layer1_weights.weights[b*2*N*layer1_neurons];
-        int16_t *dst_layer_weights = &optimized_weights->layer1_weights.weights[b*2*N*layer1_neurons];
-
-        for (int i = 0; i < layer1_neurons; i++) {
-            for (int j = 0; j < N; j++) {
-                int src_index0 = act[j].first;
-                int dst_index0 = j;
-
-                int src_index1 = act[j].first + N;
-                int dst_index1 = j + N;
-
-                dst_layer_weights[i*2*N + dst_index0] = src_layer_weights[i*2*N + src_index0];
-                dst_layer_weights[i*2*N + dst_index1] = src_layer_weights[i*2*N + src_index1];
-            }
-        }
-
-        int16_t *dst_layer_transposed_weights = &optimized_weights->layer1_weights.transposed_weights[b*2*N*layer1_neurons];
-        for (int i = 0; i < layer1_neurons; i++) {
-            for (int j = 0; j < 2*N; j++) {
-                dst_layer_transposed_weights[j*layer1_neurons + i] = dst_layer_weights[i*2*N + j];
-            }
-        }
-
-    }
-
-
-    nnue_network optimized_nnue(optimized_weights);
-
-    std::cout << "Validating..." << std::endl;
-
-    std::for_each(act.begin(), act.end(), [] (auto &x) {x.second = 0;});
-
-    for (size_t i = 0; i < test_set.size(); i++) {
-        state.load_fen(test_set[i].fen);
-        if (nnue.evaluate(state) != optimized_nnue.evaluate(state)) {
-            std::cout << "Validation failed!!!" << std::endl;
-            return;
-        }
-
-        int16_t *white_activations = optimized_nnue.get_perspective_activations(WHITE);
-        int16_t *black_activations = optimized_nnue.get_perspective_activations(BLACK);
-        for (int j = 0; j < N; j++) {
-            act[j].second += (white_activations[j] > 0);
-            act[j].second += (black_activations[j] > 0);
-        }
-    }
-
-    std::cout << "Activations after optimization" << std::endl;
-    for (int j = 0; j < N; j++) {
-        std::cout << j << ": " << std::setprecision(3) << ((double)act[j].second*50 / test_set.size()) << "%"  << std::endl;
-    }
-
-    std::cout << "Saving optimized NNUE" << std::endl;
-    optimized_weights->save(output_file);
-
-}
-
-
-
 
 
 

@@ -75,7 +75,7 @@ void filter_and_convert_data(std::vector<selfplay_result> &data_in, std::vector<
     }
     std::cout << std::endl;
 
-    std::vector<training_position> batch = get_random_batch(data, 20000);
+    std::vector<training_position> batch = get_random_batch(data, 100000);
     float scaling_factor = training_data_utility::find_scaling_factor_for_data(batch);
 
 

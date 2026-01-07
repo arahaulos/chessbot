@@ -1,15 +1,13 @@
 #include "search.hpp"
 #include <algorithm>
 #include <iostream>
-#include <memory>
-#include <thread>
 #include <cmath>
-#include <chrono>
 #include "movepicker.hpp"
 #include "movegen.hpp"
 #include "zobrist.hpp"
+#include "search_manager.hpp"
 
-alphabeta_search::alphabeta_search()
+searcher::searcher()
 {
     clear_transposition_table();
     clear_evaluation_cache();
@@ -20,15 +18,14 @@ alphabeta_search::alphabeta_search()
     test_flag = true;
 
     current_cache_age = 0;
-    limit_nodes = 0;
     num_of_pvs = 1;
 
-    shared_nnue_weights = std::make_shared<nnue_weights>();
+    shared_nnue_weights = nnue_weights::get_shared_weights();
 
     set_threads(DEFAULT_THREADS);
 }
 
-alphabeta_search::alphabeta_search(const alphabeta_search &other): transposition_table(other.transposition_table), eval_cache(other.eval_cache)
+searcher::searcher(const searcher &other): transposition_table(other.transposition_table), eval_cache(other.eval_cache)
 {
     shared_nnue_weights = other.shared_nnue_weights;
 
@@ -36,7 +33,6 @@ alphabeta_search::alphabeta_search(const alphabeta_search &other): transposition
     alphabeta_abort_flag = false;
     test_flag = other.test_flag;
     current_cache_age = other.current_cache_age;
-    limit_nodes = 0;
     num_of_pvs = other.num_of_pvs;
 
     sp = other.sp;
@@ -49,183 +45,83 @@ alphabeta_search::alphabeta_search(const alphabeta_search &other): transposition
 }
 
 
-int32_t alphabeta_search::get_transpostion_table_usage_permill()
+int32_t searcher::get_transpostion_table_usage_permill()
 {
     uint64_t slots_used = 0;
-    for (uint64_t i = 0; i < transposition_table.get_size(); i += 10) {
+    for (uint64_t i = 0; i < transposition_table.get_size(); i += 100) {
         slots_used += transposition_table[i].used(current_cache_age);
     }
-    return (slots_used*10000) / (transposition_table.get_size()*TT_ENTRIES_IN_BUCKET);
+    return (slots_used*100000) / (transposition_table.get_size()*TT_ENTRIES_IN_BUCKET);
 }
 
-alphabeta_search::~alphabeta_search()
-{
-    if (searching_flag) {
-        stop_search();
-    }
-}
 
-void alphabeta_search::clear_transposition_table()
+void searcher::clear_transposition_table()
 {
     for (uint64_t i = 0; i < transposition_table.get_size(); i++) {
         transposition_table[i].clear();
     }
 }
 
-void alphabeta_search::clear_evaluation_cache()
+void searcher::clear_evaluation_cache()
 {
     for (uint64_t i = 0; i < eval_cache.get_size(); i++) {
         eval_cache[i].clear();
     }
 }
 
-void alphabeta_search::set_threads(int num_of_threads)
+void searcher::clear_history()
 {
-    if (!is_searching()) {
-        number_of_helper_threads = std::clamp(num_of_threads-1, 0, MAX_THREADS);
-
-        thread_datas.clear();
-        for (int i = 0; i < number_of_helper_threads+1; i++) {
-            thread_datas.push_back(std::make_unique<search_context>(shared_nnue_weights));
-        }
-    }
-}
-
-void alphabeta_search::set_transposition_table_size_MB(int size_MB)
-{
-    if (!is_searching()) {
-        transposition_table.resize(size_MB);
-        clear_transposition_table();
-    }
-}
-
-
-uint64_t alphabeta_search::get_search_time_ms()
-{
-    if (!searching_flag) {
-        return 0;
-    }
-    std::chrono::high_resolution_clock::time_point t = std::chrono::high_resolution_clock::now();
-
-    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>( t - search_begin_time );
-
-    return ms.count();
-}
-
-void alphabeta_search::new_game()
-{
-    current_cache_age += 4;
-
     for (size_t i = 0; i < thread_datas.size(); i++) {
         thread_datas[i]->history.reset();
     }
 }
 
-
-void alphabeta_search::stop_search()
+void searcher::set_threads(int num_of_threads)
 {
-    searching_flag = false;
-    alphabeta_abort_flag = true;
-    search_main_thread.join();
-    time_man = nullptr;
+    number_of_helper_threads = std::clamp(num_of_threads-1, 0, MAX_THREADS);
 
-    limit_nodes = 0;
-    min_depth = 0;
+    thread_datas.clear();
+    for (int i = 0; i < number_of_helper_threads+1; i++) {
+        thread_datas.push_back(std::make_unique<search_context>(shared_nnue_weights));
+    }
 }
 
-void alphabeta_search::begin_search(const board_state &state, std::shared_ptr<time_manager> tman)
+void searcher::set_transposition_table_size_MB(int size_MB)
+{
+    transposition_table.resize(size_MB);
+    clear_transposition_table();
+}
+
+
+void searcher::new_game()
+{
+    current_cache_age += 4;
+
+    clear_history();
+}
+
+
+
+void searcher::search(const board_state &state, std::shared_ptr<search_manager> m)
 {
     if (searching_flag) {
         return;
     }
-
-    time_man = tman;
-
-    state_to_search = state;
     searching_flag = true;
-    alphabeta_abort_flag = false;
-    ready_flag = false;
-
-    search_infos.clear();
-
-    search_begin_time = std::chrono::high_resolution_clock::now();
-
-    search_main_thread = std::thread(&alphabeta_search::iterative_search, this, MAX_DEPTH);
-
-}
-
-
-
-chess_move alphabeta_search::fast_search(board_state &state, int depth, int nodes)
-{
-    state_to_search = state;
-    searching_flag = true;
-
-    if (nodes == 0) {
-        nodes = 1;
+    manager = m;
+    if (manager->tm) {
+        manager->tm->test_flag = test_flag;
     }
-
-    //search_begin_time = std::chrono::high_resolution_clock::now();
-
-    int restore_helper_threads = number_of_helper_threads;
-    number_of_helper_threads = 0;
-
-    int restore_limit_nodes = limit_nodes;
-    int restore_min_depth = min_depth;
-
-    limit_nodes = nodes;
-    min_depth = depth;
-
-    iterative_search(MAX_DEPTH);
-    number_of_helper_threads = restore_helper_threads;
-
-    limit_nodes = restore_limit_nodes;
-    min_depth = restore_min_depth;
-    searching_flag = false;
-
-    return search_infos.back().lines[0]->moves[0];
-}
-
-
-chess_move alphabeta_search::search_time(board_state &state, uint64_t time_ms, std::shared_ptr<time_manager> tman)
-{
-    begin_search(state, tman);
-
-    while ((get_search_time_ms() < time_ms || get_depth() < 3) && !is_ready_to_stop()) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
-    }
-    stop_search();
-
-    return get_move();
-}
-
-
-void alphabeta_search::iterative_search(int max_depth)
-{
     for (int i = 0; i < number_of_helper_threads+1; i++) {
-        thread_datas[i]->nnue->test_flag = test_flag;
-        thread_datas[i]->presearch(state_to_search);
+        thread_datas[i]->presearch(state);
     }
-
-    if (time_man) {
-        time_man->test_flag = test_flag;
-    }
-
-    nps = 0;
-
-    search_infos.clear();
 
     current_cache_age += 1;
-    if (current_cache_age > 500) {
-        clear_transposition_table();
-        current_cache_age = 0;
-    }
 
-    std::vector<chess_move> legal_moves = state_to_search.get_all_legal_moves(state_to_search.get_turn());
+    std::vector<chess_move> legal_moves = state.get_all_legal_moves(state.get_turn());
 
     if (legal_moves.size() == 0) {
         std::cout << "No legal moves!!" << std::endl;
-        searching_flag = false;
         return;
     }
 
@@ -236,45 +132,29 @@ void alphabeta_search::iterative_search(int max_depth)
 
     uint64_t total_nodes_searched = 0;
     int depth = 1;
-    while (depth <= max_depth) {
+    while (depth <= MAX_DEPTH && searching_flag) {
         all_threads_stats.reset();
         all_threads_stats.nodes = total_nodes_searched;
 
-        std::chrono::high_resolution_clock::time_point t2 = std::chrono::high_resolution_clock::now();
-
         aspirated_search(depth);
-
-        std::chrono::high_resolution_clock::time_point t3 = std::chrono::high_resolution_clock::now();
-
-        nps = ((all_threads_stats.nodes - total_nodes_searched)*1000) / (std::chrono::duration_cast<std::chrono::milliseconds>( t3 - t2 ).count()+1);
 
         total_nodes_searched = all_threads_stats.nodes;
 
-        if (!searching_flag || (limit_nodes != 0 && all_threads_stats.nodes > limit_nodes && depth >= min_depth)) {
-            break;
-        } else {
-            if (time_man) {
-                if (time_man->end_of_iteration(depth, get_move(), get_evaluation(), get_search_time_ms()) || root_moves.size() == 1) {
-                    ready_flag = true;
-                }
-            }
-
-            depth += 1;
-        }
+        depth += 1;
     }
 
-    ready_flag = true;
+    searching_flag = false;
 }
 
-void alphabeta_search::start_helper_threads(int32_t window_alpha, int32_t window_beta, int depth)
+void searcher::start_helper_threads(int32_t window_alpha, int32_t window_beta, int depth)
 {
     alphabeta_abort_flag = false;
     for (int i = 0; i < number_of_helper_threads; i++) {
-        helper_threads.push_back(std::thread(&alphabeta_search::search_root, this, window_alpha, window_beta, depth, i + 1));
+        helper_threads.push_back(std::thread(&searcher::search_root, this, window_alpha, window_beta, depth, i + 1));
     }
 }
 
-void alphabeta_search::stop_helper_threads()
+void searcher::stop_helper_threads()
 {
     alphabeta_abort_flag = true;
     for (int i = 0; i < number_of_helper_threads; i++) {
@@ -283,7 +163,14 @@ void alphabeta_search::stop_helper_threads()
     helper_threads.clear();
 }
 
-
+uint64_t searcher::get_total_node_count()
+{
+    uint64_t nodes = all_threads_stats.nodes;
+    for (int i = 0; i < number_of_helper_threads+1; i++) {
+        nodes += thread_datas[i]->stats.nodes;
+    }
+    return nodes;
+}
 
 void sort_root_moves(std::vector<std::pair<chess_move, int32_t>> &root_moves, chess_move prev_iteration_bm)
 {
@@ -300,7 +187,7 @@ void sort_root_moves(std::vector<std::pair<chess_move, int32_t>> &root_moves, ch
 
 
 
-void alphabeta_search::aspirated_search(int depth)
+void searcher::aspirated_search(int depth)
 {
     nominal_search_depth = depth;
 
@@ -332,10 +219,6 @@ void alphabeta_search::aspirated_search(int depth)
                 break;
             }
 
-            if (limit_nodes != 0 && all_threads_stats.nodes > limit_nodes && depth > min_depth) {
-                return;
-            }
-
             window_expansion *= 2;
         }
     } else {
@@ -343,33 +226,18 @@ void alphabeta_search::aspirated_search(int depth)
         search_root(MIN_EVAL, MAX_EVAL, depth, 0);
         sort_root_moves(root_moves, root_search_pv[0].moves[0]);
     }
-
-    info_lock.lock();
-
-    search_info info;
-    info.nodes = all_threads_stats.nodes;
-    info.time_ms = get_search_time_ms();
-    info.depth = depth;
-    info.seldepth = all_threads_stats.max_distance_to_root;
-
-    for (int i = 0; i < num_of_pvs; i++) {
-        info.lines.push_back(std::make_shared<pv_table>(root_search_pv[i]));
-    }
-    search_infos.push_back(info);
-
-    info_lock.unlock();
+    searching_flag = !manager->on_end_of_iteration(depth, all_threads_stats.max_distance_to_root, all_threads_stats.nodes, root_search_pv, num_of_pvs);
 }
 
 
 
-void alphabeta_search::search_root(int32_t window_alpha, int32_t window_beta, int depth, int thread_id)
+void searcher::search_root(int32_t window_alpha, int32_t window_beta, int depth, int thread_id)
 {
     search_context &sc = *thread_datas[thread_id];
 
     int32_t alpha = window_alpha;
     int32_t beta = window_beta;
 
-    sc.stats.reset();
     sc.history.test_flag = test_flag;
     sc.static_eval[0] = static_evaluation(sc.state, sc.state.get_turn(), sc.stats);
     sc.main_thread = (thread_id == 0);
@@ -454,15 +322,15 @@ void alphabeta_search::search_root(int32_t window_alpha, int32_t window_beta, in
 
             root_search_pv[i] = root_pv[pv_index];
             root_pv[pv_index].score = MIN_EVAL;
-
         }
     }
     all_threads_stats.add(sc.stats);
+    sc.stats.reset();
 
     root_search_lock.unlock();
 }
 
-int32_t alphabeta_search::static_evaluation(const board_state &state, player_type_t player, search_statistics &stats)
+int32_t searcher::static_evaluation(const board_state &state, player_type_t player, search_statistics &stats)
 {
     int32_t score;
     if (eval_cache[state.zhash].probe(state.zhash, score)) {
@@ -478,7 +346,7 @@ int32_t alphabeta_search::static_evaluation(const board_state &state, player_typ
 
 }
 
-int32_t alphabeta_search::alphabeta(board_state &state, int32_t alpha, int32_t beta, int depth, int ply, search_context &sc, pv_table &pv, chess_move *skip_move, node_type_t expected_node_type)
+int32_t searcher::alphabeta(board_state &state, int32_t alpha, int32_t beta, int depth, int ply, search_context &sc, pv_table &pv, chess_move *skip_move, node_type_t expected_node_type)
 {
     sc.stats.max_distance_to_root = std::max(sc.stats.max_distance_to_root, ply);
 
@@ -493,9 +361,10 @@ int32_t alphabeta_search::alphabeta(board_state &state, int32_t alpha, int32_t b
         return INVALID_EVAL;
     }
 
-    if (sc.main_thread && time_man && (sc.stats.nodes % 2048) == 0) {
-        if (time_man->should_stop_search(get_search_time_ms())) {
-            ready_flag = true;
+    if (sc.main_thread && (sc.stats.nodes % 2048) == 0) {
+        if (manager->on_search_stop_control(get_total_node_count())) {
+            alphabeta_abort_flag = true;
+            searching_flag = false;
         }
     }
 
@@ -603,6 +472,7 @@ int32_t alphabeta_search::alphabeta(board_state &state, int32_t alpha, int32_t b
         return (eval + beta) / 2;
     }
 
+
     //Null move pruning
     //If position is so good that giving opponent extra move doesn't bring us below beta at reduced search, we can relatively safely prune this subtree
     int non_pawn_pieces = state.count_non_pawn_pieces(state.get_turn());
@@ -629,7 +499,6 @@ int32_t alphabeta_search::alphabeta(board_state &state, int32_t alpha, int32_t b
 
         unmake_restore restore = state.make_null_move();
 
-        //Searching as cut node is not correct, but some reason (probably because RFP is limited to cut nodes), it is stronger
         int32_t null_score = -alphabeta(state, -beta, 1-beta, nmp_depth, ply+1, sc, line, nullptr, CUT_NODE);
 
         state.unmake_null_move(restore);
@@ -793,7 +662,7 @@ int32_t alphabeta_search::alphabeta(board_state &state, int32_t alpha, int32_t b
         }
         bool causes_check = state.causes_check(mov, next_turn(state.get_turn()));
         bool is_capture = mov.is_capture();
-        bool is_promotion = (mov.promotion != 0);
+        bool is_promotion = mov.is_promotion();
 
 
         int extensions = (move_type == TT_MOVE ? tt_move_extensions : 0);
@@ -808,9 +677,10 @@ int32_t alphabeta_search::alphabeta(board_state &state, int32_t alpha, int32_t b
         //Forward pruning at low depth
         if (best_score != MIN_EVAL && !is_mate_score(best_score) && ply > 2) {
             int lmr_depth = std::clamp(depth - reductions, (depth+1)/2, depth);
+            int lmp_count = depth*depth + 6 + (is_pv ? 4 : 0);
 
-            if ((mpicker.legal_moves >= (depth*depth+6)   && improving) ||
-                (mpicker.legal_moves >= (depth*depth+6)/2 && !improving)) {
+            if ((mpicker.legal_moves >= lmp_count   && improving) ||
+                (mpicker.legal_moves >= lmp_count/2 && !improving)) {
                 mpicker.skip_quiets(); //Late move pruning. Currently does not prune killers
             }
 
@@ -971,7 +841,6 @@ int32_t alphabeta_search::alphabeta(board_state &state, int32_t alpha, int32_t b
         }
     }
 
-
     if (is_score_valid(best_score) && best_move.valid()) {
         //Update static evaluation correction history
         if (!is_mate_score(best_score) && !best_move.is_capture() && !in_check && skip_move == nullptr) {
@@ -994,6 +863,7 @@ int32_t alphabeta_search::alphabeta(board_state &state, int32_t alpha, int32_t b
         if (node_type == ALL_NODE && tt_hit) {
             best_move = tt_move;
         }
+
         transposition_table[zhash].store(zhash, best_move, depth, node_type, best_score, raw_eval, ply, current_cache_age);
     }
 
@@ -1002,7 +872,7 @@ int32_t alphabeta_search::alphabeta(board_state &state, int32_t alpha, int32_t b
 
 
 
-int32_t alphabeta_search::quisearch(board_state &state, int32_t alpha, int32_t beta, int depth, int ply, search_context &sc, bool is_pv)
+int32_t searcher::quisearch(board_state &state, int32_t alpha, int32_t beta, int depth, int ply, search_context &sc, bool is_pv)
 {
     if (ply >= MAX_DEPTH) {
         return static_evaluation(state, state.get_turn(), sc.stats);
@@ -1060,6 +930,7 @@ int32_t alphabeta_search::quisearch(board_state &state, int32_t alpha, int32_t b
         if (eval >= beta) {
             return eval;
         }
+
         if (alpha < eval) {
             alpha = eval;
         }
@@ -1076,7 +947,7 @@ int32_t alphabeta_search::quisearch(board_state &state, int32_t alpha, int32_t b
             return eval;
         }
 
-        //Non TT moves which have negative SEE are pruned. Captures are tried before any other moves. MVV-LVV is used to sort captures
+        //Non TT moves which have negative SEE are pruned.
         bool tt_move_found = false;
         for (int i = 0; i < num_of_moves; i++) {
             chess_move mov = movelist[i];
@@ -1104,14 +975,13 @@ int32_t alphabeta_search::quisearch(board_state &state, int32_t alpha, int32_t b
         //When in check, we search all move
         chess_move all_moves[240];
         int num_of_moves = move_generator::generate_all_pseudo_legal_moves(state, state.get_turn(), all_moves);
-
         for (int i = 0; i < num_of_moves; i++) {
             moves.add(all_moves[i], (all_moves[i] == tt_move ? 32000 : static_exchange_evaluation(state, all_moves[i])));
         }
     }
-
+    int32_t see;
     chess_move mov;
-    while (moves.pick(mov)) {
+    while (moves.pick(mov, see)) {
         if (state.causes_check(mov, state.get_turn())) {
             continue;
         }

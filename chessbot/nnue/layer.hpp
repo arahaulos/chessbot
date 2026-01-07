@@ -370,7 +370,6 @@ struct nnue_layer
         int16_t *p_layer0_idx = (int16_t*)__builtin_assume_aligned(prev_layer_active_outputs0, 32);
         int16_t *p_layer1_idx = (int16_t*)__builtin_assume_aligned(prev_layer_active_outputs1, 32);
 
-
         #if USE_AVX2
 
         constexpr int vec_out = OUT / 16;
@@ -412,6 +411,7 @@ struct nnue_layer
                 acc_hi[j] = _mm256_add_epi32(acc_hi[j], _mm256_madd_epi16(input1, w1_hi));
             }
         }
+
         for (int i = 0; i < num_of_active_inputs1; i += 4) {
             int16_t idx0 = p_layer1_idx[i];
             int16_t idx1 = p_layer1_idx[i+1];

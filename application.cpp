@@ -4,7 +4,7 @@
 #include <iomanip>
 #include "application.hpp"
 #include "chessbot/perft.hpp"
-#include "chessbot/search.hpp"
+#include "chessbot/search_manager.hpp"
 
 #include "chessbot/util/datagen.hpp"
 
@@ -13,7 +13,7 @@ application::application()
 {
     game = std::make_shared<game_state>();
 
-    alphabeta = std::make_shared<alphabeta_search>();
+    alphabeta = std::make_shared<searcher>();
 
     uci = std::make_shared<uci_interface>(alphabeta, game);
 
@@ -213,14 +213,16 @@ void application::run_tests()
 
 uint64_t application::bench_position(std::string position_fen, int depth)
 {
+    std::shared_ptr<search_manager> search_man = std::make_shared<search_manager>();
+    search_man->prepare_fixed_depth_search(depth);
+
     std::cout << "Searching position " << position_fen << " depth " << depth << std::endl;
     game->get_state().load_fen(position_fen);
-    alphabeta->fast_search(game->get_state(), depth, 0);
-    //alphabeta->test_flag = true;
+    alphabeta->search(game->get_state(), search_man);
 
-    std::cout << "bestmove " << alphabeta->get_move().to_uci() << std::endl;
+    std::cout << "bestmove " << search_man->get_move().to_uci() << std::endl;
 
-    return alphabeta->get_node_count();
+    return search_man->get_node_count();
 }
 
 
@@ -229,12 +231,8 @@ void application::run_benchmark()
     uint64_t total_nodes = 0;
     auto start_time = std::chrono::high_resolution_clock::now();
 
-    //alphabeta->load_nnue_net("optimized.nnue");
-
-    for (int i = 0; i < 3; i++) {
-
+    for (int i = 0; i < 10; i++) {
         total_nodes += bench_position("2rq1r1k/pp3ppp/3n4/n2p4/1Q6/2PBBP1P/P4P2/2KR2R1 w - - 0 19", 20);
-
         total_nodes += bench_position("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", 20);
         total_nodes += bench_position("5rk1/1b2bpp1/p3pn1p/1p1q4/3B4/1P1NPP1P/P1rNQ1P1/R1R3K1 b - -", 20);
         total_nodes += bench_position("8/4b1k1/8/p4Q2/1p2N1Pp/1P1K3P/P5q1/8 w - -", 20);
@@ -244,7 +242,6 @@ void application::run_benchmark()
         total_nodes += bench_position("3rr2k/6p1/2nb3p/p1pq4/3p2Q1/PP2P1PP/4RP2/BN1R2K1 w - -", 20);
         total_nodes += bench_position("r7/8/3N2k1/3P2p1/3B1p2/1b3P2/6PK/8 b - -", 20);
         total_nodes += bench_position("r1b2rk1/4np1p/1p2pnp1/p5N1/PqPN4/1P1R3P/3Q1PP1/4RBK1 w - -", 20);
-
         total_nodes += bench_position("8/3r2pk/1Q4np/1Nn3q1/P1P5/2B2b2/6PP/4RBK1 b - -", 20);
         total_nodes += bench_position("2b1r1k1/Q4pp1/1pq2n1p/4p3/1PP2b2/5N1P/P3BPP1/3R1RK1 b - -", 20);
         total_nodes += bench_position("2b3r1/2P4k/p3N1p1/7p/2N1R3/2Pr1P2/1R3bPK/8 b - -", 20);
@@ -255,7 +252,6 @@ void application::run_benchmark()
         total_nodes += bench_position("r2q1rk1/1b2bppp/1p2pn2/pPnP4/3N4/P2BP3/1B1N1PPP/R2Q1RK1 w - -", 20);
         total_nodes += bench_position("3r4/1RR2p1p/4ppk1/p7/P7/1P2PPK1/1r4PP/8 b - -", 20);
         total_nodes += bench_position("r4rk1/ppp1nppp/2nbbq2/8/Q2pP3/3P1N2/PP1NBPPP/R1B2RK1 w - -", 20);
-
     }
 
     auto end_time = std::chrono::high_resolution_clock::now();
@@ -273,6 +269,17 @@ void application::run()
     uci->start();
 
     while (!uci->exit()) {
+        std::string cmd;
+        while (uci->get_non_uci_cmd(cmd)) {
+            if (cmd == "eval") {
+                eval_trace(game->get_state().generate_fen());
+            } else if (cmd == "bench") {
+                run_benchmark();
+            } else if (cmd == "test") {
+                run_tests();
+            }
+        }
+
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
 }
@@ -280,10 +287,10 @@ void application::run()
 
 void application::eval_trace(std::string fen)
 {
+    nnue_network net(nnue_weights::get_shared_weights());
+
     board_state state;
     state.load_fen(fen);
-
-    nnue_network net(std::make_shared<nnue_weights>());
 
     int32_t eval = net.evaluate(state);
 
@@ -294,6 +301,7 @@ void application::eval_trace(std::string fen)
             values[i] = 0.0f;
         } else {
             state.set_square(i, piece(WHITE, EMPTY));
+            state.recalculate_hashes();
 
             int32_t new_eval = net.evaluate(state);
 
