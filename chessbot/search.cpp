@@ -127,20 +127,23 @@ void searcher::search(const board_state &state, std::shared_ptr<search_manager> 
 
     root_moves.clear();
     for (auto it = legal_moves.begin(); it != legal_moves.end(); it++) {
-        root_moves.push_back(std::pair(*it, 0));
+        if (manager->is_root_move_allowed(*it)) {
+            root_moves.push_back(std::pair(*it, 0));
+        }
     }
 
     uint64_t total_nodes_searched = 0;
-    int depth = 1;
-    while (depth <= MAX_DEPTH && searching_flag) {
+
+    nominal_search_depth = 1;
+    while (nominal_search_depth <= MAX_DEPTH && searching_flag) {
         all_threads_stats.reset();
         all_threads_stats.nodes = total_nodes_searched;
 
-        aspirated_search(depth);
+        aspirated_search();
 
         total_nodes_searched = all_threads_stats.nodes;
 
-        depth += 1;
+        nominal_search_depth += 1;
     }
 
     searching_flag = false;
@@ -165,6 +168,9 @@ void searcher::stop_helper_threads()
 
 uint64_t searcher::get_total_node_count()
 {
+    //All threads have own counters for nodes etc.
+    //After root search is finished, those counters are added to global all_thread_stats structure
+    //This function is used to get true node count everywhere
     uint64_t nodes = all_threads_stats.nodes;
     for (int i = 0; i < number_of_helper_threads+1; i++) {
         nodes += thread_datas[i]->stats.nodes;
@@ -187,11 +193,13 @@ void sort_root_moves(std::vector<std::pair<chess_move, int32_t>> &root_moves, ch
 
 
 
-void searcher::aspirated_search(int depth)
+void searcher::aspirated_search()
 {
-    nominal_search_depth = depth;
+    int start_depth = nominal_search_depth;
+    uint64_t start_nodes = all_threads_stats.nodes;
 
-    if (depth > 4) {
+    drop_depth_flag = false;
+    if (nominal_search_depth > 4) {
         int64_t window_expansion = 25;
 
         int64_t window_beta_limit = MAX_EVAL-1;
@@ -202,12 +210,19 @@ void searcher::aspirated_search(int depth)
         while (searching_flag) {
             sort_root_moves(root_moves, root_search_pv[0].moves[0]);
 
-            start_helper_threads(window_alpha, window_beta, depth);
-            search_root(window_alpha, window_beta, depth, 0);
+            start_helper_threads(window_alpha, window_beta, nominal_search_depth);
+            search_root(window_alpha, window_beta, nominal_search_depth, 0);
             stop_helper_threads();
 
             if (!searching_flag) {
                 return;
+            }
+
+            if (drop_depth_flag) {
+                nominal_search_depth -= 1;
+                drop_depth_node_count += (all_threads_stats.nodes - start_nodes);
+                drop_depth_flag = false;
+                continue;
             }
 
             //Adjust window when search failed high or low
@@ -216,6 +231,10 @@ void searcher::aspirated_search(int depth)
             } else if (root_search_pv[num_of_pvs-1].score <= window_alpha) {
                 window_alpha = std::max((int64_t)root_search_pv[num_of_pvs-1].score - window_expansion, window_alpha_limit);
             } else {
+                uint64_t nodes = (all_threads_stats.nodes - start_nodes);
+
+                drop_depth_node_count = all_threads_stats.nodes + (nominal_search_depth < start_depth ? nodes*3 : nodes*2);
+
                 break;
             }
 
@@ -223,12 +242,11 @@ void searcher::aspirated_search(int depth)
         }
     } else {
         alphabeta_abort_flag = false;
-        search_root(MIN_EVAL, MAX_EVAL, depth, 0);
+        search_root(MIN_EVAL, MAX_EVAL, nominal_search_depth, 0);
         sort_root_moves(root_moves, root_search_pv[0].moves[0]);
     }
-    searching_flag = !manager->on_end_of_iteration(depth, all_threads_stats.max_distance_to_root, all_threads_stats.nodes, root_search_pv, num_of_pvs);
+    searching_flag = !manager->on_end_of_iteration(nominal_search_depth, all_threads_stats.max_distance_to_root, all_threads_stats.nodes, root_search_pv, num_of_pvs);
 }
-
 
 
 void searcher::search_root(int32_t window_alpha, int32_t window_beta, int depth, int thread_id)
@@ -342,8 +360,8 @@ int32_t searcher::static_evaluation(const board_state &state, player_type_t play
 
         eval_cache[state.zhash].store(state.zhash, score);
     }
-    return score;
 
+    return score;
 }
 
 int32_t searcher::alphabeta(board_state &state, int32_t alpha, int32_t beta, int depth, int ply, search_context &sc, pv_table &pv, chess_move *skip_move, node_type_t expected_node_type)
@@ -362,9 +380,13 @@ int32_t searcher::alphabeta(board_state &state, int32_t alpha, int32_t beta, int
     }
 
     if (sc.main_thread && (sc.stats.nodes % 2048) == 0) {
-        if (manager->on_search_stop_control(get_total_node_count())) {
+        uint64_t node_count = get_total_node_count();
+        if (manager->on_search_stop_control(node_count)) {
             alphabeta_abort_flag = true;
             searching_flag = false;
+        } else if (node_count >= drop_depth_node_count && nominal_search_depth > 6) {
+            alphabeta_abort_flag = true;
+            drop_depth_flag = true;
         }
     }
 

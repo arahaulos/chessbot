@@ -1,5 +1,6 @@
 #include "search_manager.hpp"
 #include "uci.hpp"
+#include <algorithm>
 
 void search_manager::prepare_clock_search(std::shared_ptr<time_manager> tman)
 {
@@ -65,6 +66,24 @@ void search_manager::stop_search()
         uci->search_end();
     }
     ready_flag = true;
+}
+
+
+void search_manager::set_allowed_root_moves(const std::vector<chess_move> &allowed_moves)
+{
+    allowed_root_moves.clear();
+    for (chess_move m : allowed_moves) {
+        allowed_root_moves.push_back(m);
+    }
+}
+
+
+bool search_manager::is_root_move_allowed(chess_move mov)
+{
+    if (allowed_root_moves.size() == 0) {
+        return true;
+    }
+    return (std::find(allowed_root_moves.begin(), allowed_root_moves.end(), mov) != allowed_root_moves.end());
 }
 
 
@@ -151,6 +170,8 @@ void search_manager::prepare_common()
     results.clear();
     nodes = 0;
     depth = 0;
+
+    allowed_root_moves.clear();
 }
 
 uint64_t search_manager::get_timestamp()

@@ -35,9 +35,13 @@ struct search_manager
     void prepare_fixed_time_search(int time_ms);
     void prepare_infinite_search();
 
+    void set_allowed_root_moves(const std::vector<chess_move> &allowed_moves);
+
     void start_clock(std::shared_ptr<time_manager> tman);
 
     void stop_search();
+
+    bool is_root_move_allowed(chess_move mov);
 
     bool on_end_of_iteration(int depth, int seldepth, uint64_t nodes, pv_table *pv, int num_of_pvs);
     bool on_search_stop_control(uint64_t nodes);
@@ -99,11 +103,17 @@ struct search_manager
         return 0;
     }
 
-    search_result get_search_result(int depth)
+    int32_t get_iteration_count()
+    {
+        std::lock_guard<std::mutex> guard(results_lock);
+        return results.size();
+    }
+
+    search_result get_iteration_result(int it)
     {
         std::lock_guard<std::mutex> guard(results_lock);
 
-        return results[depth-1];
+        return results[it];
     }
 
     chess_move get_move() {
@@ -141,6 +151,8 @@ struct search_manager
 private:
     void prepare_common();
     uint64_t get_timestamp();
+
+    std::vector<chess_move> allowed_root_moves;
 
     uint64_t start_time;
 

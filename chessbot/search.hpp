@@ -303,7 +303,7 @@ private:
     int32_t static_evaluation(const board_state &state, player_type_t player, search_statistics &stats);
     void start_helper_threads(int32_t window_alpha, int32_t window_beta, int depth);
     void stop_helper_threads();
-    void aspirated_search(int depth);
+    void aspirated_search();
     void search_root(int32_t window_alpha, int32_t window_beta, int depth, int thread_id);
 
     int32_t alphabeta(board_state &state, int32_t alpha, int32_t beta, int depth, int ply, search_context &sc, pv_table &pv, chess_move *skip_move, node_type_t expected_node_type);
@@ -322,6 +322,10 @@ private:
     int num_of_pvs;
     pv_table root_search_pv[MAX_MULTI_PV];
     std::mutex root_search_lock;
+
+    uint64_t drop_depth_node_count;
+
+    std::atomic<bool> drop_depth_flag;
 
     std::atomic<bool> searching_flag;
     std::atomic<bool> alphabeta_abort_flag;

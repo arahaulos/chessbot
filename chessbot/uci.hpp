@@ -64,7 +64,8 @@ private:
     void input_loop();
     void search_thread_entry();
 
-    int last_info_depth;
+    int last_info_iteration;
+    int depth_reached;
 
     std::atomic<bool> exit_flag;
     std::atomic<bool> running;

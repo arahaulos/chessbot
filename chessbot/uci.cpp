@@ -111,6 +111,7 @@ void uci_interface::input_loop()
 
             if (input_str == "quit") {
                 exit_flag = true;
+                search_man->stop_search();
                 return;
             } else {
                 execute_command(input_str);
@@ -220,13 +221,20 @@ void uci_interface::execute_command(std::string cmd_line)
         }
 
         std::vector<std::string> splitted_cmd = split_string(cmd_line, ' ');
-
+        std::vector<chess_move> search_moves;
+        bool parse_moves = false;
         go_info info;
         info.type = GO_CLOCK;
         info.active = true;
         for (auto it = splitted_cmd.begin(); it != splitted_cmd.end(); it++) {
             std::string str = *it;
             auto next_it = it+1;
+            if (parse_moves) {
+                chess_move mov;
+                mov.from_uci(str);
+                search_moves.push_back(mov);
+                continue;
+            }
             if (next_it != splitted_cmd.end()) {
                 if (str == "movetime") {
                     info.type = GO_MOVETIME;
@@ -249,7 +257,7 @@ void uci_interface::execute_command(std::string cmd_line)
                     info.depth = std::atoi(next_it->c_str());
 
                 }
-               if (str == "nodes") {
+                if (str == "nodes") {
                     info.type = GO_NODES;
                     info.nodes = std::atoi(next_it->c_str());
                 }
@@ -259,6 +267,9 @@ void uci_interface::execute_command(std::string cmd_line)
             }
             if (str == "ponder") {
                 info.type = GO_PONDER;
+            }
+            if (str == "searchmoves") {
+                parse_moves = true;
             }
         }
         ginfo = info;
@@ -280,9 +291,14 @@ void uci_interface::execute_command(std::string cmd_line)
             search_man->prepare_infinite_search();
         }
 
+        if (search_moves.size() > 0) {
+            search_man->set_allowed_root_moves(search_moves);
+        }
+
         search_thread = std::thread(&uci_interface::search_thread_entry, this);
 
-        last_info_depth = 0;
+        last_info_iteration = 0;
+        depth_reached = 0;
     } else if (cmd == "stop") {
         search_man->stop_search();
         if (search_thread.joinable()) {
@@ -367,15 +383,15 @@ bool uci_interface::get_non_uci_cmd(std::string &str)
 
 void uci_interface::iteration_end()
 {
-    int latest_depth = search_man->get_depth();
-    if (latest_depth != last_info_depth) {
+    int latest_iteration = search_man->get_iteration_count();
+    if (latest_iteration != last_info_iteration) {
 
         int hashfull = search_instance->get_transpostion_table_usage_permill();
         int multi_pv = search_instance->get_multi_pv();
         uint64_t nps = search_man->get_nps();
 
-        for (int i = last_info_depth+1; i <= latest_depth; i++) {
-            search_result info = search_man->get_search_result(i);
+        for (int i = last_info_iteration; i < latest_iteration; i++) {
+            search_result info = search_man->get_iteration_result(i);
 
             for (int j = 0; j < multi_pv; j++) {
                 int32_t eval = scale_eval(info.lines[j]->score);
@@ -386,7 +402,7 @@ void uci_interface::iteration_end()
 
                 std::stringstream ss;
                 ss << "info depth ";
-                ss << info.depth;
+                ss << std::max(info.depth, depth_reached);
 
                 ss << " seldepth ";
 
@@ -434,15 +450,21 @@ void uci_interface::iteration_end()
                 }
 
                 send_command(ss.str());
+
+                depth_reached = std::max(info.depth, depth_reached);
             }
 
         }
-        last_info_depth = latest_depth;
+        last_info_iteration = latest_iteration;
     }
 }
 
 void uci_interface::search_end()
 {
+    if (exit_flag) {
+        return;
+    }
+
     if (ponder) {
         pv_table pv;
         search_man->get_pv(pv);

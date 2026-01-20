@@ -426,10 +426,10 @@ void tuning_utility::tune_search_params(int time, int time_inc, int threads, int
 
         std::cout << "\rTuning " << num_of_games - *games_left << "/" << num_of_games << "  Speed: " << (int)games_per_hour << " games/hour   Est: " << hours_left << "h " << minutes_left << "min         ";
 
-        if (std::chrono::duration_cast<std::chrono::milliseconds>(time_now - last_save_time).count() > 10000) {
+        if (std::chrono::duration_cast<std::chrono::milliseconds>(time_now - last_save_time).count() > 60000) {
             last_save_time = time_now;
 
-            std::ofstream file("search_tuning.txt", std::ios::app);
+            std::ofstream file(output_file, std::ios::app);
             if (file.is_open()) {
                 file << "\n\nPlayed: " << num_of_games - *games_left << "\n";
 
@@ -453,7 +453,7 @@ void tuning_utility::tune_search_params(int time, int time_inc, int threads, int
 
     int elo = testing_utility::test(1000, time, time_inc, s0, s1, threads, opening_suite);
 
-    std::ofstream file("search_tuning.txt", std::ios::app);
+    std::ofstream file(output_file, std::ios::app);
     if (file.is_open()) {
         file << "\n\nFinal " << elo << " Elo\n";
         int num_of_params = sizeof(search_params) / sizeof(int32_t);
