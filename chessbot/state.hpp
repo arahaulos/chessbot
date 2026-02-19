@@ -229,59 +229,6 @@ struct chess_move
     }
 };
 
-struct unmake_restore;
-
-struct board_threats
-{
-    bitboard attacked_squares[2][8];
-    bitboard all_attacks[2];
-
-    bitboard threatened_pawns[2];
-    bitboard threatened_minors[2];
-    bitboard threatened_majors[2];
-
-    bitboard hanging_pawns[2];
-    bitboard hanging_minors[2];
-    bitboard hanging_majors[2];
-
-    void update(const board_state &state);
-    void update(const board_state &state, const unmake_restore &restore, chess_move mov);
-
-
-    bool operator == (const board_threats &other)
-    {
-        for (int i = 0; i < 2; i++) {
-            if (all_attacks[i] != other.all_attacks[i] ||
-                threatened_pawns[i] != other.threatened_pawns[i] ||
-                threatened_minors[i] != other.threatened_minors[i] ||
-                threatened_majors[i] != other.threatened_majors[i] ||
-                hanging_pawns[i] != other.hanging_pawns[i] ||
-                hanging_minors[i] != other.hanging_minors[i] ||
-                hanging_majors[i] != other.hanging_majors[i]) {
-                return false;
-            }
-
-            for (int j = PAWN; j <= KING; j++) {
-                if (attacked_squares[i][j] != other.attacked_squares[i][j]) {
-                    return false;
-                }
-            }
-        }
-        return true;
-    }
-
-    bool operator != (const board_threats &other)
-    {
-        return !(*this == other);
-    }
-
-private:
-    void update_all_attack_sets(const board_state &state);
-    void update_attack_set(const board_state &state, const bitboard &occupation, piece p);
-
-    void update_threats(const board_state &state);
-};
-
 struct unmake_restore
 {
     piece from;

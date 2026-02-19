@@ -388,26 +388,12 @@ struct nnue_layer
             __m256i input0 = _mm256_unpacklo_epi16(_mm256_set1_epi16(p_layer0[idx0]), _mm256_set1_epi16(p_layer0[idx1]));
             __m256i input1 = _mm256_unpacklo_epi16(_mm256_set1_epi16(p_layer0[idx2]), _mm256_set1_epi16(p_layer0[idx3]));
 
-            /*__m256i input0 = _mm256_set1_epi32(*(int32_t*)&p_layer0[i+0]);
-            __m256i input1 = _mm256_set1_epi32(*(int32_t*)&p_layer0[i+2]);
-
-            const int16_t* __restrict w0 = &weights0_ptr[(i+0)*OUT];
-            const int16_t* __restrict w1 = &weights0_ptr[(i+1)*OUT];
-            const int16_t* __restrict w2 = &weights0_ptr[(i+2)*OUT];
-            const int16_t* __restrict w3 = &weights0_ptr[(i+3)*OUT];*/
-
             for (int j = 0; j < vec_out; j++) {
                 __m256i w16_0 = _mm256_load_si256((__m256i*)&weights0_ptr[idx0*OUT + j*16]);
                 __m256i w16_1 = _mm256_load_si256((__m256i*)&weights0_ptr[idx1*OUT + j*16]);
 
                 __m256i w16_2 = _mm256_load_si256((__m256i*)&weights0_ptr[idx2*OUT + j*16]);
                 __m256i w16_3 = _mm256_load_si256((__m256i*)&weights0_ptr[idx3*OUT + j*16]);
-
-                /*__m256i w16_0 = _mm256_load_si256((__m256i*)&w0[j*16]);
-                __m256i w16_1 = _mm256_load_si256((__m256i*)&w1[j*16]);
-
-                __m256i w16_2 = _mm256_load_si256((__m256i*)&w2[j*16]);
-                __m256i w16_3 = _mm256_load_si256((__m256i*)&w3[j*16]);*/
 
                 __m256i w0_lo = _mm256_unpacklo_epi16(w16_0, w16_1);
                 __m256i w0_hi = _mm256_unpackhi_epi16(w16_0, w16_1);
@@ -432,27 +418,12 @@ struct nnue_layer
             __m256i input0 = _mm256_unpacklo_epi16(_mm256_set1_epi16(p_layer1[idx0]), _mm256_set1_epi16(p_layer1[idx1]));
             __m256i input1 = _mm256_unpacklo_epi16(_mm256_set1_epi16(p_layer1[idx2]), _mm256_set1_epi16(p_layer1[idx3]));
 
-            /*__m256i input0 = _mm256_set1_epi32(*(int32_t*)&p_layer1[i+0]);
-            __m256i input1 = _mm256_set1_epi32(*(int32_t*)&p_layer1[i+2]);
-
-            const int16_t* __restrict w0 = &weights1_ptr[(i+0)*OUT];
-            const int16_t* __restrict w1 = &weights1_ptr[(i+1)*OUT];
-            const int16_t* __restrict w2 = &weights1_ptr[(i+2)*OUT];
-            const int16_t* __restrict w3 = &weights1_ptr[(i+3)*OUT];*/
-
-
             for (int j = 0; j < vec_out; j++) {
                 __m256i w16_0 = _mm256_load_si256((__m256i*)&weights1_ptr[idx0*OUT + j*16]);
                 __m256i w16_1 = _mm256_load_si256((__m256i*)&weights1_ptr[idx1*OUT + j*16]);
 
                 __m256i w16_2 = _mm256_load_si256((__m256i*)&weights1_ptr[idx2*OUT + j*16]);
                 __m256i w16_3 = _mm256_load_si256((__m256i*)&weights1_ptr[idx3*OUT + j*16]);
-
-                /*__m256i w16_0 = _mm256_load_si256((__m256i*)&w0[j*16]);
-                __m256i w16_1 = _mm256_load_si256((__m256i*)&w1[j*16]);
-
-                __m256i w16_2 = _mm256_load_si256((__m256i*)&w2[j*16]);
-                __m256i w16_3 = _mm256_load_si256((__m256i*)&w3[j*16]);*/
 
                 __m256i w0_lo = _mm256_unpacklo_epi16(w16_0, w16_1);
                 __m256i w0_hi = _mm256_unpackhi_epi16(w16_0, w16_1);
