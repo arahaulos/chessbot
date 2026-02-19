@@ -1,6 +1,6 @@
 #include "training_nnue.hpp"
 #include "../../state.hpp"
-#include "../huffman.hpp"
+#include "../compression.hpp"
 
 
 float training_network::evaluate(const board_state &s)
@@ -48,15 +48,24 @@ float training_network::evaluate(const board_state &s)
 
     output_bucket = encode_output_bucket(non_pawn_pieces);
 
+    float white_psqt = white_side.output[num_perspective_neurons/2 + output_bucket];
+    float black_psqt = black_side.output[num_perspective_neurons/2 + output_bucket];
+    float psqt_output = 0;
+
     if (s.get_turn() == WHITE) {
-        layer1.update(output_bucket, white_side.neurons, black_side.neurons);
+        psqt_output = (white_psqt - black_psqt) * 0.5f;
+        layer1.update(output_bucket, white_side.output, black_side.output);
     } else {
-        layer1.update(output_bucket, black_side.neurons, white_side.neurons);
+        psqt_output = (black_psqt - white_psqt) * 0.5f;
+        layer1.update(output_bucket, black_side.output, white_side.output);
     }
     layer2.update(output_bucket, layer1.neurons);
     output_layer.update(output_bucket, layer2.neurons);
 
-    return output_layer.neurons[0];
+    last_psqt_eval = psqt_output;
+    last_pos_eval = output_layer.neurons[0];
+
+    return output_layer.neurons[0] + psqt_output;
 }
 
 float training_network::evaluate(const training_position &tp)
@@ -130,16 +139,59 @@ float training_network::evaluate(const training_position &tp)
 
     white_side.update();
     black_side.update();
+
+    float white_psqt = white_side.output[num_perspective_neurons/2 + output_bucket];
+    float black_psqt = black_side.output[num_perspective_neurons/2 + output_bucket];
+    float psqt_output = 0;
+
     if (tp.get_turn() == WHITE) {
-        layer1.update(output_bucket, white_side.neurons, black_side.neurons);
+        psqt_output = (white_psqt - black_psqt) * 0.5f;
+        layer1.update(output_bucket, white_side.output, black_side.output);
     } else {
-        layer1.update(output_bucket, black_side.neurons, white_side.neurons);
+        psqt_output = (black_psqt - white_psqt) * 0.5f;
+        layer1.update(output_bucket, black_side.output, white_side.output);
     }
 
     layer2.update(output_bucket, layer1.neurons);
     output_layer.update(output_bucket, layer2.neurons);
 
-    return output_layer.neurons[0];
+    last_psqt_eval = psqt_output;
+    last_pos_eval = output_layer.neurons[0];
+
+    return output_layer.neurons[0] + psqt_output;
+}
+
+void training_network::back_propagate(training_weights &grad, float loss_delta, player_type_t stm, bool freeze_perspective)
+{
+    output_layer.grads[0] = loss_delta;
+
+    output_layer.back_propagate(output_bucket, &grad.output_weights, layer2.grads, layer2.neurons);
+    layer2.back_propagate(output_bucket, &grad.layer2_weights, layer1.grads, layer1.neurons);
+
+    float white_psqt_grad = 0;
+    float black_psqt_grad = 0;
+    float *white_psqt_grad_vec = &white_side.output_grads[num_perspective_neurons/2];
+    float *black_psqt_grad_vec = &black_side.output_grads[num_perspective_neurons/2];
+
+    if (stm == WHITE) {
+        layer1.back_propagate(output_bucket, &grad.layer1_weights, white_side.output_grads, black_side.output_grads, white_side.output, black_side.output);
+        white_psqt_grad = loss_delta * 0.5f;
+        black_psqt_grad = -loss_delta * 0.5f;
+    } else {
+        layer1.back_propagate(output_bucket, &grad.layer1_weights, black_side.output_grads, white_side.output_grads, black_side.output, white_side.output);
+        black_psqt_grad = loss_delta * 0.5f;
+        white_psqt_grad = -loss_delta * 0.5f;
+    }
+
+    for (int i = 0; i < num_perspective_psqt; i++) {
+        white_psqt_grad_vec[i] = (output_bucket == i ? white_psqt_grad : 0.0f);
+        black_psqt_grad_vec[i] = (output_bucket == i ? black_psqt_grad : 0.0f);
+    }
+
+    if (!freeze_perspective) {
+        white_side.back_propagate(&grad.perspective_weights);
+        black_side.back_propagate(&grad.perspective_weights);
+    }
 }
 
 void training_weights::save_file(std::string path)
@@ -169,10 +221,13 @@ void training_weights::load_file(std::string path)
 
 void training_weights::save_quantized(std::string path)
 {
-    int16_t *weights = new int16_t[perspective_weights.num_of_quantized_params() +
-                                   layer1_weights.num_of_quantized_params() +
-                                   layer2_weights.num_of_quantized_params() +
-                                   output_weights.num_of_quantized_params()];
+
+    size_t weight_size = perspective_weights.num_of_quantized_params() +
+                         layer1_weights.num_of_quantized_params() +
+                         layer2_weights.num_of_quantized_params() +
+                         output_weights.num_of_quantized_params();
+
+    int16_t *weights = new int16_t[weight_size];
     size_t index = 0;
 
     perspective_weights.save_quantized(weights, index);
@@ -183,7 +238,7 @@ void training_weights::save_quantized(std::string path)
     uint8_t *encoded_data;
     int encoded_size;
 
-    huffman_coder::encode((uint8_t*)weights, index*2, encoded_data, encoded_size);
+    nnue_compressor::encode((uint8_t*)weights, index*2, encoded_data, encoded_size);
 
     std::ofstream file(path.c_str(), std::ios::binary);
     if (file.is_open()) {

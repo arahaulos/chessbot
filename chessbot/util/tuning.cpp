@@ -424,7 +424,10 @@ void tuning_utility::tune_search_params(int time, int time_inc, int threads, int
             minutes_left = (time_left - (double)hours_left)*60;
         }
 
-        std::cout << "\rTuning " << num_of_games - *games_left << "/" << num_of_games << "  Speed: " << (int)games_per_hour << " games/hour   Est: " << hours_left << "h " << minutes_left << "min         ";
+        std::cout << "\rTuning " << num_of_games - *games_left << "/" << num_of_games
+                  << "  Speed: " << (int)games_per_hour
+                  << " games/hour   Est: " << hours_left << "h " << minutes_left << "min         "
+                  << std::flush;
 
         if (std::chrono::duration_cast<std::chrono::milliseconds>(time_now - last_save_time).count() > 60000) {
             last_save_time = time_now;

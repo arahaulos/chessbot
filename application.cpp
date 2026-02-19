@@ -218,6 +218,7 @@ uint64_t application::bench_position(std::string position_fen, int depth)
 
     std::cout << "Searching position " << position_fen << " depth " << depth << std::endl;
     game->get_state().load_fen(position_fen);
+    alphabeta->test_flag = false;
     alphabeta->search(game->get_state(), search_man);
 
     std::cout << "bestmove " << search_man->get_move().to_uci() << std::endl;
@@ -231,7 +232,7 @@ void application::run_benchmark()
     uint64_t total_nodes = 0;
     auto start_time = std::chrono::high_resolution_clock::now();
 
-    for (int i = 0; i < 10; i++) {
+    for (int i = 0; i < 1; i++) {
         total_nodes += bench_position("2rq1r1k/pp3ppp/3n4/n2p4/1Q6/2PBBP1P/P4P2/2KR2R1 w - - 0 19", 20);
         total_nodes += bench_position("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", 20);
         total_nodes += bench_position("5rk1/1b2bpp1/p3pn1p/1p1q4/3B4/1P1NPP1P/P1rNQ1P1/R1R3K1 b - -", 20);
@@ -293,6 +294,10 @@ void application::eval_trace(std::string fen)
     state.load_fen(fen);
 
     int32_t eval = net.evaluate(state);
+
+    std::cout << "Eval: " << eval << std::endl;
+    std::cout << "Positional: " << net.last_pos_eval << std::endl;
+    std::cout << "PSQT: " << net.last_psqt_eval << std::endl;
 
     float values[64];
     for (int i = 0; i < 64; i++) {

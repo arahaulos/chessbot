@@ -179,7 +179,8 @@ int testing_utility::test(int games, int time, int time_inc, searcher &s0, searc
                   << "  G: "    << games - agames << "/" << games
                   << "  R: "    << wins << "/" << draws << "/" << losses
                   << "  Elo: "  << elo
-                  << "  LLR: "  << llr << "      ";
+                  << "  LLR: "  << llr << "      "
+                  << std::flush;
 
 
         if (llr < lower || llr > upper) {

@@ -1,7 +1,7 @@
 #include "nnue.hpp"
 #include "../state.hpp"
 #include <algorithm>
-#include "huffman.hpp"
+#include "compression.hpp"
 
 
 void nnue_network::reset_nnue()
@@ -178,17 +178,31 @@ int16_t nnue_network::evaluate(player_type_t stm)
         black_refresh_table[current_state->black_king_sq].save(&black_side, current_state);
     }
 
+    int32_t our_psqt;
+    int32_t their_psqt;
+
     white_side.update_activations();
     black_side.update_activations();
     if (stm == WHITE) {
+        our_psqt = white_side.get_psqt_vec()[output_bucket];
+        their_psqt = black_side.get_psqt_vec()[output_bucket];
         layer1.update(output_bucket, white_side.neurons, white_side.outputs_idx, white_side.num_of_outputs, black_side.neurons, black_side.outputs_idx, black_side.num_of_outputs);
     } else {
+        our_psqt = black_side.get_psqt_vec()[output_bucket];
+        their_psqt = white_side.get_psqt_vec()[output_bucket];
         layer1.update(output_bucket, black_side.neurons, black_side.outputs_idx, black_side.num_of_outputs, white_side.neurons, white_side.outputs_idx, white_side.num_of_outputs);
     }
     layer2.update(output_bucket, layer1.neurons);
     output_layer.update(output_bucket, layer2.neurons);
 
-    return (output_layer.out * 100 * weights->rescale_factor0) / (output_quantization_fractions * weights->rescale_factor1);
+
+    int32_t ls_out = (output_layer.out * 100) / output_quantization_fractions;
+    int32_t psqt_out = ((our_psqt - their_psqt)*50) / psqt_quantization_fractions;
+
+    last_pos_eval = ls_out;
+    last_psqt_eval = psqt_out;
+
+    return ls_out + psqt_out;
 }
 
 int16_t nnue_network::evaluate(const board_state &s)
@@ -217,12 +231,13 @@ unsigned char* embedded_weights_data = _binary_embedded_weights_nnue_start;
 
 nnue_weights::nnue_weights()
 {
-    uint8_t *decoded_data;
-    int decoded_size;
-    huffman_coder::decode(embedded_weights_data, embedded_weights_size, decoded_data, decoded_size);
 
     rescale_factor0 = 1;
     rescale_factor1 = 1;
+
+    uint8_t *decoded_data;
+    int decoded_size;
+    nnue_compressor::decode(embedded_weights_data, embedded_weights_size, decoded_data, decoded_size);
 
     size_t index = 0;
     perspective_weights.load((int16_t*)decoded_data, index);
@@ -249,7 +264,7 @@ void nnue_weights::load(std::string path)
 
         uint8_t *decoded_data;
         int decoded_size;
-        huffman_coder::decode(encoded_data, fsize, decoded_data, decoded_size);
+        nnue_compressor::decode(encoded_data, fsize, decoded_data, decoded_size);
 
         size_t index = 0;
         perspective_weights.load((int16_t*)decoded_data, index);
@@ -283,7 +298,7 @@ void nnue_weights::save(std::string path)
 
         uint8_t *encoded_data;
         int encoded_size;
-        huffman_coder::encode(raw_data, total_params*sizeof(int16_t), encoded_data, encoded_size);
+        nnue_compressor::encode(raw_data, total_params*sizeof(int16_t), encoded_data, encoded_size);
 
         file.write((char*)encoded_data, encoded_size);
 

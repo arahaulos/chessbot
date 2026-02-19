@@ -224,10 +224,9 @@ struct nnue_layer
             return;
         }
 
-        int16_t *weights_ptr = (int16_t*)__builtin_assume_aligned(&weights->transposed_weights[bucket*IN*OUT], 32);
-        int16_t *biases_ptr = (int16_t*)__builtin_assume_aligned(&weights->biases[bucket*OUT], 32);
-        int16_t *p_layer = (int16_t*)__builtin_assume_aligned(prev_layer, 32);
-
+        const int16_t* __restrict weights_ptr = (int16_t*)__builtin_assume_aligned(&weights->transposed_weights[bucket*IN*OUT], 32);
+        const int16_t* __restrict biases_ptr = (int16_t*)__builtin_assume_aligned(&weights->biases[bucket*OUT], 32);
+        const int16_t* __restrict p_layer = (int16_t*)__builtin_assume_aligned(prev_layer, 32);
 
         #if USE_AVX2
 
@@ -297,9 +296,7 @@ struct nnue_layer
             _mm_store_si128((__m128i*)&neurons[i*8], v);
         }
 
-
         #else
-
 
         __m128i acc[OUT / 4];
 
@@ -360,15 +357,15 @@ struct nnue_layer
     void update(int bucket, int16_t *prev_layer0, int16_t *prev_layer_active_outputs0, int num_of_active_inputs0, int16_t *prev_layer1, int16_t *prev_layer_active_outputs1, int num_of_active_inputs1) {
         constexpr int shift = (IS_OUTPUT_LAYER ? output_quantization_shift : layer_quantization_shift);
 
-        int16_t *weights0_ptr = (int16_t*)__builtin_assume_aligned(&weights->transposed_weights[bucket*IN*OUT], 32);
-        int16_t *weights1_ptr = (int16_t*)__builtin_assume_aligned(&weights->transposed_weights[bucket*IN*OUT + (IN/2)*OUT], 32);
-        int16_t *biases_ptr = (int16_t*)__builtin_assume_aligned(&weights->biases[bucket*OUT], 32);
+        const int16_t* __restrict weights0_ptr = (int16_t*)__builtin_assume_aligned(&weights->transposed_weights[bucket*IN*OUT], 32);
+        const int16_t* __restrict weights1_ptr = (int16_t*)__builtin_assume_aligned(&weights->transposed_weights[bucket*IN*OUT + (IN/2)*OUT], 32);
+        const int16_t* __restrict biases_ptr = (int16_t*)__builtin_assume_aligned(&weights->biases[bucket*OUT], 32);
 
-        int16_t *p_layer0 = (int16_t*)__builtin_assume_aligned(prev_layer0, 32);
-        int16_t *p_layer1 = (int16_t*)__builtin_assume_aligned(prev_layer1, 32);
+        const int16_t* __restrict p_layer0 = (int16_t*)__builtin_assume_aligned(prev_layer0, 32);
+        const int16_t* __restrict p_layer1 = (int16_t*)__builtin_assume_aligned(prev_layer1, 32);
 
-        int16_t *p_layer0_idx = (int16_t*)__builtin_assume_aligned(prev_layer_active_outputs0, 32);
-        int16_t *p_layer1_idx = (int16_t*)__builtin_assume_aligned(prev_layer_active_outputs1, 32);
+        const int16_t* __restrict p_layer0_idx = (int16_t*)__builtin_assume_aligned(prev_layer_active_outputs0, 32);
+        const int16_t* __restrict p_layer1_idx = (int16_t*)__builtin_assume_aligned(prev_layer_active_outputs1, 32);
 
         #if USE_AVX2
 
@@ -391,12 +388,26 @@ struct nnue_layer
             __m256i input0 = _mm256_unpacklo_epi16(_mm256_set1_epi16(p_layer0[idx0]), _mm256_set1_epi16(p_layer0[idx1]));
             __m256i input1 = _mm256_unpacklo_epi16(_mm256_set1_epi16(p_layer0[idx2]), _mm256_set1_epi16(p_layer0[idx3]));
 
+            /*__m256i input0 = _mm256_set1_epi32(*(int32_t*)&p_layer0[i+0]);
+            __m256i input1 = _mm256_set1_epi32(*(int32_t*)&p_layer0[i+2]);
+
+            const int16_t* __restrict w0 = &weights0_ptr[(i+0)*OUT];
+            const int16_t* __restrict w1 = &weights0_ptr[(i+1)*OUT];
+            const int16_t* __restrict w2 = &weights0_ptr[(i+2)*OUT];
+            const int16_t* __restrict w3 = &weights0_ptr[(i+3)*OUT];*/
+
             for (int j = 0; j < vec_out; j++) {
                 __m256i w16_0 = _mm256_load_si256((__m256i*)&weights0_ptr[idx0*OUT + j*16]);
                 __m256i w16_1 = _mm256_load_si256((__m256i*)&weights0_ptr[idx1*OUT + j*16]);
 
                 __m256i w16_2 = _mm256_load_si256((__m256i*)&weights0_ptr[idx2*OUT + j*16]);
                 __m256i w16_3 = _mm256_load_si256((__m256i*)&weights0_ptr[idx3*OUT + j*16]);
+
+                /*__m256i w16_0 = _mm256_load_si256((__m256i*)&w0[j*16]);
+                __m256i w16_1 = _mm256_load_si256((__m256i*)&w1[j*16]);
+
+                __m256i w16_2 = _mm256_load_si256((__m256i*)&w2[j*16]);
+                __m256i w16_3 = _mm256_load_si256((__m256i*)&w3[j*16]);*/
 
                 __m256i w0_lo = _mm256_unpacklo_epi16(w16_0, w16_1);
                 __m256i w0_hi = _mm256_unpackhi_epi16(w16_0, w16_1);
@@ -421,12 +432,27 @@ struct nnue_layer
             __m256i input0 = _mm256_unpacklo_epi16(_mm256_set1_epi16(p_layer1[idx0]), _mm256_set1_epi16(p_layer1[idx1]));
             __m256i input1 = _mm256_unpacklo_epi16(_mm256_set1_epi16(p_layer1[idx2]), _mm256_set1_epi16(p_layer1[idx3]));
 
+            /*__m256i input0 = _mm256_set1_epi32(*(int32_t*)&p_layer1[i+0]);
+            __m256i input1 = _mm256_set1_epi32(*(int32_t*)&p_layer1[i+2]);
+
+            const int16_t* __restrict w0 = &weights1_ptr[(i+0)*OUT];
+            const int16_t* __restrict w1 = &weights1_ptr[(i+1)*OUT];
+            const int16_t* __restrict w2 = &weights1_ptr[(i+2)*OUT];
+            const int16_t* __restrict w3 = &weights1_ptr[(i+3)*OUT];*/
+
+
             for (int j = 0; j < vec_out; j++) {
                 __m256i w16_0 = _mm256_load_si256((__m256i*)&weights1_ptr[idx0*OUT + j*16]);
                 __m256i w16_1 = _mm256_load_si256((__m256i*)&weights1_ptr[idx1*OUT + j*16]);
 
                 __m256i w16_2 = _mm256_load_si256((__m256i*)&weights1_ptr[idx2*OUT + j*16]);
                 __m256i w16_3 = _mm256_load_si256((__m256i*)&weights1_ptr[idx3*OUT + j*16]);
+
+                /*__m256i w16_0 = _mm256_load_si256((__m256i*)&w0[j*16]);
+                __m256i w16_1 = _mm256_load_si256((__m256i*)&w1[j*16]);
+
+                __m256i w16_2 = _mm256_load_si256((__m256i*)&w2[j*16]);
+                __m256i w16_3 = _mm256_load_si256((__m256i*)&w3[j*16]);*/
 
                 __m256i w0_lo = _mm256_unpacklo_epi16(w16_0, w16_1);
                 __m256i w0_hi = _mm256_unpackhi_epi16(w16_0, w16_1);
@@ -565,7 +591,6 @@ struct nnue_layer
 
         #endif
     }
-
 
     int32_t out;
     int16_t *neurons;

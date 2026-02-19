@@ -310,7 +310,8 @@ void training_datagen::datagen(std::string output_file, std::string nnue_file, i
                   << std::fixed << std::setprecision(2) << avg_depth << "   E: "
                   << std::setprecision(2) << first_move_abs_eval / 100 << "   BF: "
                   << std::setprecision(2) << opening_branching_factor
-                  << "  est: " << hours_left << "h " << minutes_left << "min     ";
+                  << "  est: " << hours_left << "h " << minutes_left << "min     "
+                  << std::flush;
 
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }

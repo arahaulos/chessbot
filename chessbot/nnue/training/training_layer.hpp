@@ -19,7 +19,7 @@ T* align_ptr(T *buffer_ptr)
 template <int N>
 inline void copy_vectorized(float *ov, const float *av, int tid, int tc)
 {
-    if (N < 512) {
+    if (N < 1024) {
         if (tid == 0) {
             tc = 1;
         } else {
@@ -47,7 +47,7 @@ inline void copy_vectorized(float *ov, const float *av, int tid, int tc)
 template <int N>
 inline void add_vectorized(float *ov, const float *av, const float *bv, int tid, int tc)
 {
-    if (N < 512) {
+    if (N < 1024) {
         if (tid == 0) {
             tc = 1;
         } else {
@@ -78,7 +78,7 @@ inline void add_vectorized(float *ov, const float *av, const float *bv, int tid,
 template <int N>
 inline void mult_vectorized(float *ov, const float *av, const float *bv, int tid, int tc)
 {
-    if (N < 512) {
+    if (N < 1024) {
         if (tid == 0) {
             tc = 1;
         } else {
@@ -112,7 +112,7 @@ inline void mult_vectorized(float *ov, const float *av, const float *bv, int tid
 template <int N>
 inline void mult_vectorized(float *ov, const float *av, float value, int tid, int tc)
 {
-    if (N < 512) {
+    if (N < 1024) {
         if (tid == 0) {
             tc = 1;
         } else {
@@ -146,7 +146,7 @@ inline void mult_vectorized(float *ov, const float *av, float value, int tid, in
 template <int N>
 inline void set_vectorized(float *ov, float value, int tid, int tc)
 {
-    if (N < 512) {
+    if (N < 1024) {
         if (tid == 0) {
             tc = 1;
         } else {
@@ -178,7 +178,7 @@ inline void set_vectorized(float *ov, float value, int tid, int tc)
 template <int N>
 inline void ema_vectorized(float *ov, float *av, float val, int tid, int tc)
 {
-    if (N < 512) {
+    if (N < 1024) {
         if (tid == 0) {
             tc = 1;
         } else {
@@ -302,6 +302,17 @@ struct training_layer_weights
     void load(std::istream &stream) {
         stream.read((char*)weights, (NEURONS*INPUTS*STACK_SIZE)*sizeof(float));
         stream.read((char*)biases, NEURONS*STACK_SIZE*sizeof(float));
+
+        for (size_t i = 0; i < NEURONS*INPUTS*STACK_SIZE; i++) {
+            if (std::isinf(weights[i]) || std::isnan(weights[i])) {
+                std::cout << "Warning: loading net which have bad weight value: " << weights[i] << std::endl;
+            }
+        }
+        for (size_t i = 0; i < NEURONS*STACK_SIZE; i++) {
+            if (std::isinf(biases[i])) {
+                std::cout << "Warning: loading net which have bad weight value: " << biases[i] << std::endl;
+            }
+        }
     }
 
     void save_quantized(int16_t *data, size_t &index) {
@@ -309,12 +320,12 @@ struct training_layer_weights
         float quant_correction_frac = 1.0f;
 
 
-        if (INPUTS == 2*num_perspective_neurons && IS_OUTPUT_LAYER) {
+        if (INPUTS == num_perspective_neurons && IS_OUTPUT_LAYER) {
             fracs = output_quantization_fractions;
 
             quant_correction_frac = (double)output_quantization_fractions / (double)halfkp_quantization_fractions;
 
-        } else if (INPUTS == 2*num_perspective_neurons) {
+        } else if (INPUTS == num_perspective_neurons) {
             quant_correction_frac = (double)layer_quantization_fractions / (double)halfkp_quantization_fractions;
         } else if (IS_OUTPUT_LAYER) {
             fracs = output_quantization_fractions;
@@ -555,7 +566,7 @@ struct training_layer
 
         #else
 
-        acculumator[neuron] = 0;
+        acculumator[neuron] = weights->biases[OUT*bucket + neuron];
         for (int i = 0; i < IN; i++) {
             acculumator[neuron] += prev_layer[i]*weights->weights[IN*OUT*bucket + neuron*IN + i];
         }
@@ -609,14 +620,10 @@ struct training_layer
 
         #else
 
-        acculumator[neuron] = 0;
+        acculumator[neuron] = weights->biases[OUT*bucket + neuron];
         for (int i = 0; i < IN/2; i++) {
             acculumator[neuron] += weights->weights[IN*OUT*bucket + neuron*IN + i]*prev_layer0[i];
-        }
-
-        acculumator[neuron] = 0;
-        for (int i = 0; i < IN/2; i++) {
-            acculumator[neuron] += weights->weights[IN*OUT*bucket + neuron*IN + i + (IN/2)]*prev_layer0[i];
+            acculumator[neuron] += weights->weights[IN*OUT*bucket + neuron*IN + i + (IN/2)]*prev_layer1[i];
         }
 
         #endif

@@ -4,6 +4,7 @@
 #include <x86gprintrin.h>
 #include <x86intrin.h>
 
+
 #if defined(__BMI2__)
     #define USE_PEXT 1
 #else

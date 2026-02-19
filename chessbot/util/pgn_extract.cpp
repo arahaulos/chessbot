@@ -175,7 +175,7 @@ void pgn_extract::create_dataset(const std::string &pgn_folder, std::string outp
     int queued_pgns = extractor.pgns_queued();
     int total_pgns = extractor.get_total_pgns();
     while (queued_pgns > 0) {
-        std::cout << "\rAnalyzing games " << (total_pgns-queued_pgns) << "/" << total_pgns << "   ";
+        std::cout << "\rAnalyzing games " << (total_pgns-queued_pgns) << "/" << total_pgns << "   " << std::flush;
 
         queued_pgns = extractor.pgns_queued();
 

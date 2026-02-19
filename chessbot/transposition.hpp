@@ -207,6 +207,15 @@ struct tt_bucket
         return used;
     }
 
+    void refresh_age(const uint64_t &zhash, int current_age) {
+        for (int i = 0; i < TT_ENTRIES_IN_BUCKET; i++) {
+            if (entries[i].is_valid(zhash)) {
+                entries[i].overwrite_age(zhash, current_age);
+                return;
+            }
+        }
+    }
+
     bool probe(const board_state &state, const uint64_t &zhash, chess_move &bm, int &d, int &t, int32_t &e, int32_t &se, int ply) const {
 
         tt_bucket buck;

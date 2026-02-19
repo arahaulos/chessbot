@@ -1,14 +1,7 @@
 #include "wdl_model.hpp"
 #include <iostream>
-#include <filesystem>
-#include <thread>
-#include <mutex>
-#include <queue>
-#include <chrono>
-#include <atomic>
 #include <array>
 
-#include "../search.hpp"
 #include "pgn_parser.hpp"
 #include "misc.hpp"
 

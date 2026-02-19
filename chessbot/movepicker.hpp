@@ -161,6 +161,7 @@ struct move_picker
 
         piece moving = state->get_square(mov.from);
         int32_t score = 0;
+
         if (moving.get_type() == BISHOP || moving.get_type() == KNIGHT) {
             if (state->is_square_threatened_by_pawn(mov.from, moving.get_player())) {
                 score += minor_threat_value;
@@ -271,6 +272,7 @@ struct move_picker
                 continue;
             }
             int32_t score = history_table->get_quiet_history(ply, m);
+
             if (static_exchange_evaluation(*state, m) >= 0 && !checks.is_full()) {
                 checks.add(m, score);
             }

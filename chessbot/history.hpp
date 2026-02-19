@@ -154,7 +154,12 @@ struct history_heurestic_table
     }
 
     int32_t get_quiet_history(int ply, chess_move m) {
-        return get_continuation_history(m, ply) + history.get(m);
+        int32_t history_score = 0;
+
+        history_score += get_continuation_history(m, ply);
+        history_score += history.get(m);
+
+        return history_score;
     }
 
     int get_killers(chess_move *buffer, int ply)

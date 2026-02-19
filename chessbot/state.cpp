@@ -148,7 +148,6 @@ unmake_restore board_state::make_move(chess_move m, uint64_t new_zhash) {
         }
     }
 
-
     if (nnue && m.promotion == EMPTY) {
         flags &= ~INCREMENT_NNUE;
         nnue->move_piece(p, get_square(m.to), m.from, m.to);
@@ -606,8 +605,6 @@ std::string piece_to_str(piece_type_t t)
         return std::string("Empty");
     }
 }
-
-
 
 
 

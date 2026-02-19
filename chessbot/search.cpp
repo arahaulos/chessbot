@@ -348,6 +348,7 @@ void searcher::search_root(int32_t window_alpha, int32_t window_beta, int depth,
     root_search_lock.unlock();
 }
 
+
 int32_t searcher::static_evaluation(const board_state &state, player_type_t player, search_statistics &stats)
 {
     int32_t score;
@@ -389,7 +390,6 @@ int32_t searcher::alphabeta(board_state &state, int32_t alpha, int32_t beta, int
             drop_depth_flag = true;
         }
     }
-
 
     if (state.check_repetition() >= 2 || state.half_move_clock >= 100 || state.is_insufficient_material()) {
         return 0;
@@ -482,7 +482,9 @@ int32_t searcher::alphabeta(board_state &state, int32_t alpha, int32_t beta, int
 
     //Reverse futility pruning
     //If evaluation is good enough at shallow depth, we prune
-    int32_t rfmargin = std::max(0, sp.rfmargin_base + sp.rfmargin_mult*depth - (improving ? sp.rfmargin_improving_modifier : 0));
+    int32_t rfmargin = std::max(0,  sp.rfmargin_base
+                                  + sp.rfmargin_mult*depth
+                                  - sp.rfmargin_improving_modifier*improving);
     if (is_cut &&
         !in_check &&
         depth < 6 &&
@@ -493,7 +495,6 @@ int32_t searcher::alphabeta(board_state &state, int32_t alpha, int32_t beta, int
     {
         return (eval + beta) / 2;
     }
-
 
     //Null move pruning
     //If position is so good that giving opponent extra move doesn't bring us below beta at reduced search, we can relatively safely prune this subtree
@@ -686,7 +687,6 @@ int32_t searcher::alphabeta(board_state &state, int32_t alpha, int32_t beta, int
         bool is_capture = mov.is_capture();
         bool is_promotion = mov.is_promotion();
 
-
         int extensions = (move_type == TT_MOVE ? tt_move_extensions : 0);
         int reductions = (int)(std::log2(depth) * std::log2(std::max(1, mpicker.legal_moves - is_pv)) * ((float)sp.lmr_modifier) / 100.0f);
 
@@ -700,8 +700,7 @@ int32_t searcher::alphabeta(board_state &state, int32_t alpha, int32_t beta, int
         if (best_score != MIN_EVAL && !is_mate_score(best_score) && ply > 2) {
             int lmr_depth = std::clamp(depth - reductions, (depth+1)/2, depth);
             int lmp_count = depth*depth + 6 + (is_pv ? 4 : 0);
-
-            if ((mpicker.legal_moves >= lmp_count   && improving) ||
+            if ((mpicker.legal_moves >= lmp_count   &&  improving) ||
                 (mpicker.legal_moves >= lmp_count/2 && !improving)) {
                 mpicker.skip_quiets(); //Late move pruning. Currently does not prune killers
             }
@@ -866,7 +865,6 @@ int32_t searcher::alphabeta(board_state &state, int32_t alpha, int32_t beta, int
     if (is_score_valid(best_score) && best_move.valid()) {
         //Update static evaluation correction history
         if (!is_mate_score(best_score) && !best_move.is_capture() && !in_check && skip_move == nullptr) {
-
             if ((node_type == CUT_NODE && raw_eval < best_score) ||
                 (node_type == ALL_NODE && raw_eval > best_score) ||
                  node_type == PV_NODE) {
@@ -976,14 +974,15 @@ int32_t searcher::quisearch(board_state &state, int32_t alpha, int32_t beta, int
             if (mov == tt_move) {
                 tt_move_found = true;
                 moves.add(mov, 32000);
-            } else {
-                int32_t see = static_exchange_evaluation(state, mov);
-                if (mov.is_capture()) {
-                    see += sc.history.get_capture_history(mov)/32;
-                }
-                if (see >= 0) {
-                    moves.add(mov, see);
-                }
+                continue;
+            }
+
+            int32_t see = static_exchange_evaluation(state, mov);
+            if (mov.is_capture()) {
+                see += sc.history.get_capture_history(mov)/32;
+            }
+            if (see >= 0) {
+                moves.add(mov, see);
             }
         }
 

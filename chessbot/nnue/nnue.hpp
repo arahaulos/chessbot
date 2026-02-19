@@ -22,8 +22,8 @@ struct nnue_weights
 {
     nnue_weights();
 
-    nnue_perspective_weights<num_perspective_inputs, num_perspective_neurons> perspective_weights;
-    nnue_layer_weights<num_perspective_neurons*2, layer1_neurons, layer_stack_size> layer1_weights;
+    nnue_perspective_weights<num_perspective_inputs, quantized_acculumator_width> perspective_weights;
+    nnue_layer_weights<num_perspective_neurons, layer1_neurons, layer_stack_size> layer1_weights;
     nnue_layer_weights<layer1_neurons, layer2_neurons, layer_stack_size> layer2_weights;
     nnue_layer_weights<layer2_neurons, 1, layer_stack_size> output_weights;
 
@@ -55,14 +55,14 @@ struct nnue_board_state
 struct acculumator_refresh_table_entry
 {
     acculumator_refresh_table_entry() {
-        acculumator_buffer = new int16_t[num_perspective_neurons+64];
+        acculumator_buffer = new int16_t[quantized_acculumator_width+64];
         acculumator = align_ptr(acculumator_buffer);
     }
     ~acculumator_refresh_table_entry() {
         delete [] acculumator_buffer;
     }
 
-    void save(nnue_perspective<num_perspective_inputs, num_perspective_neurons> *p, nnue_board_state *s)
+    void save(nnue_perspective<num_perspective_inputs, num_perspective_neurons, quantized_perspective_psqt> *p, nnue_board_state *s)
     {
         p->acculumator_copy(acculumator, p->acculumator);
         state = *s;
@@ -93,6 +93,9 @@ struct nnue_network
     void unset_piece(piece p, square_index sq);
     void move_piece(piece p, piece captured_p, square_index from_sq, square_index to_sq);
 
+
+    int16_t last_pos_eval;
+    int16_t last_psqt_eval;
 
     void reset()
     {
@@ -126,23 +129,24 @@ struct nnue_network
         current_state -= 1;
     }
 
-    int16_t *get_perspective_activations(player_type_t stm)
+    nnue_perspective<num_perspective_inputs, num_perspective_neurons, quantized_perspective_psqt>
+    &get_perspective(player_type_t stm)
     {
         if (stm == WHITE) {
-            return white_side.neurons;
+            return white_side;
         } else {
-            return black_side.neurons;
+            return black_side;
         }
     }
 
-    std::shared_ptr<nnue_weights> weights;
+    const std::shared_ptr<nnue_weights> weights;
 private:
     void reset_nnue();
 
 
-    nnue_perspective<num_perspective_inputs, num_perspective_neurons> black_side;
-    nnue_perspective<num_perspective_inputs, num_perspective_neurons> white_side;
-    nnue_layer<num_perspective_neurons*2, layer1_neurons, layer_stack_size, false> layer1;
+    nnue_perspective<num_perspective_inputs, num_perspective_neurons, quantized_perspective_psqt> black_side;
+    nnue_perspective<num_perspective_inputs, num_perspective_neurons, quantized_perspective_psqt> white_side;
+    nnue_layer<num_perspective_neurons, layer1_neurons, layer_stack_size, false> layer1;
     nnue_layer<layer1_neurons, layer2_neurons, layer_stack_size, false> layer2;
     nnue_layer<layer2_neurons, 1, layer_stack_size, true> output_layer;
 

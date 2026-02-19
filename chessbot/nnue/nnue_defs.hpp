@@ -14,28 +14,39 @@ constexpr size_t num_of_king_buckets = 16;
 constexpr size_t num_perspective_inputs = inputs_per_bucket*num_of_king_buckets;
 constexpr size_t factorizer_inputs = inputs_per_bucket;
 
-constexpr size_t num_perspective_neurons = 512;
+constexpr size_t num_perspective_neurons = 768;
+constexpr size_t num_perspective_psqt = 8;
+constexpr size_t quantized_perspective_pad = 8;
+
+constexpr size_t quantized_perspective_psqt = num_perspective_psqt + quantized_perspective_pad;
+constexpr size_t quantized_acculumator_width = num_perspective_neurons + num_perspective_psqt + quantized_perspective_pad;
 
 constexpr size_t layer_stack_size = 8;
 constexpr size_t layer1_neurons = 16;
 constexpr size_t layer2_neurons = 32;
 
-constexpr size_t output_buckets = 8;
-
 constexpr int output_quantization_fractions = 2048;
-constexpr float output_quantization_clamp_max = 10000.0f/output_quantization_fractions;
-constexpr float output_quantization_clamp_min = -output_quantization_clamp_max;
-
-constexpr int layer_quantization_fractions = 2048;
-constexpr float layer_quantization_clamp_max = 8000.0f/layer_quantization_fractions;
-constexpr float layer_quantization_clamp_min = -layer_quantization_clamp_max;
-
-constexpr int halfkp_quantization_fractions = 1024;
-constexpr float halfkp_quantization_clamp_max = 4000.0f/halfkp_quantization_fractions;
-constexpr float halfkp_quantization_clamp_min = -halfkp_quantization_clamp_max;
-
 constexpr int output_quantization_shift = 11;
-constexpr int layer_quantization_shift = 11;
+
+constexpr float output_quantization_clamp_max = 5.0f;
+constexpr float output_quantization_clamp_min = -5.0f;
+
+constexpr int layer_quantization_fractions = 1024;
+constexpr int layer_quantization_shift = 10;
+
+constexpr float layer_quantization_clamp_max = 4.0f;
+constexpr float layer_quantization_clamp_min = -4.0f;
+
+constexpr int halfkp_quantization_fractions = 512;
+constexpr int halfkp_quantization_shift = 9;
+
+constexpr float halfkp_quantization_clamp_max = 2.0f;
+constexpr float halfkp_quantization_clamp_min = -2.0f;
+
+constexpr float psqt_clamp_max = 32.0f;
+constexpr float psqt_clamp_min = -32.0f;
+constexpr int psqt_quantization_fractions = 256;
+
 
 inline int get_king_bucket(int king_sq)
 {
@@ -92,8 +103,8 @@ inline int encode_output_bucket(uint64_t non_pawn_pieces)
     int b = pop_count(non_pawn_pieces) / 2;
     if (b < 0) {
         b = 0;
-    } else if (b >= output_buckets) {
-        b = output_buckets-1;
+    } else if (b >= layer_stack_size) {
+        b = layer_stack_size-1;
     }
     return b;
 }

@@ -1,16 +1,16 @@
 # UCI chess engine
 
-Estimated strength 3500 Elo (Blitz)
+Estimated strength 3550 Elo (Blitz)
 
 ## efficiently updatable neural network (NNUE) evaluation
 - 16 king buckets (total 2x16x768 inputs)
 - 8 bucket layer stack (determined by number of non pawn pieces)
-- (16x768 -> 512)x2 -> (16 -> 32 -> 1)x8 architecture
+- (16x768 -> 776)x2 -> (16 -> 32 -> 1)x8 architecture
 - clipped relu activation function
 - quantized 16-bit fixed point arithmetics
 - manually vectorized
-- trained on selfplay positions (~5 billion positions)
-- CPU trainer (backpropagation + ADAM optimizer)
+- trained on fully selfplay positions (~8 billion positions)
+- Custom CPU trainer (ADAMW optimizer)
 
 ## principal variation search
 

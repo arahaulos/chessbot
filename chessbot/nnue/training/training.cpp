@@ -8,10 +8,29 @@
 #include <sstream>
 #include <filesystem>
 #include <random>
-#include "save_bmp.hpp"
 #include "../nnue.hpp"
 
 #include "../../search.hpp"
+
+
+struct trainer_params
+{
+    bool use_factorized;
+    float learning_rate;
+    float weight_decay;
+    float beta1;
+    float beta2;
+    int batch_size;
+    int epoch_size;
+    float min_lambda;
+    float max_lambda;
+
+    bool freeze_perspective;
+    bool enable_position_skipping;
+
+    float learning_rate_decay;
+};
+
 
 void randomize_floats(float *f, int n, float std_mean, float std_deviation, std::mt19937 &gen)
 {
@@ -63,32 +82,30 @@ void init_weights(training_weights &weights, bool init_perspectives_weights)
 
                 size_t input = num_of_king_buckets*inputs_per_bucket + i;
 
-                weights.perspective_weights.weights[input*num_perspective_neurons + j] = 0.01f;
+                weights.perspective_weights.weights[input*(num_perspective_neurons + num_perspective_psqt) + j] = 0.01f;
+            }
 
+
+            for (size_t j = num_perspective_neurons; j < num_perspective_neurons+num_perspective_psqt; j++) {
+                size_t input = num_of_king_buckets*inputs_per_bucket + i;
+
+                int piece_type = (i / 2) % 6;
+                int piece_color = i % 2;
+
+                static float piece_values[6] = {1.0, 3.2, 3.3, 5.5, 9.5, 0};
+
+                float val = 0;
+                if (piece_color == 0) {
+                    val = piece_values[piece_type]*1.8f;
+                } else {
+                    val = -piece_values[piece_type]*1.8f;
+                }
+
+                weights.perspective_weights.weights[input*(num_perspective_neurons + num_perspective_psqt) + j] = val;
             }
         }
     }
 }
-
-void back_propagate(training_network &net, training_weights &grad, float loss_delta, player_type_t stm, bool freeze_perspective)
-{
-    net.output_layer.grads[0] = loss_delta;
-
-    net.output_layer.back_propagate(net.output_bucket, &grad.output_weights, net.layer2.grads, net.layer2.neurons);
-    net.layer2.back_propagate(net.output_bucket, &grad.layer2_weights, net.layer1.grads, net.layer1.neurons);
-
-    if (stm == WHITE) {
-        net.layer1.back_propagate(net.output_bucket, &grad.layer1_weights, net.white_side.grads, net.black_side.grads, net.white_side.neurons, net.black_side.neurons);
-    } else {
-        net.layer1.back_propagate(net.output_bucket, &grad.layer1_weights, net.black_side.grads, net.white_side.grads, net.black_side.neurons, net.white_side.neurons);
-    }
-
-    if (!freeze_perspective) {
-        net.white_side.back_propagate(&grad.perspective_weights);
-        net.black_side.back_propagate(&grad.perspective_weights);
-    }
-}
-
 
 class semaphore {
     std::mutex mutex_;
@@ -125,24 +142,35 @@ void loss(float pred, float target, float &loss, float &loss_delta)
     loss_delta = exponent * s * std::pow(d, exponent - 1.0f);
 }
 
+bool skip_position(training_position &pos)
+{
+    constexpr int max_eval_error = 200;
+
+    int32_t eval = pos.eval;
+    float wdl = pos.get_wdl_relative_to_stm();
+
+    return ((eval > max_eval_error && wdl < 0.25f) ||
+            (eval < -max_eval_error && wdl > 0.75f));
+}
+
 
 enum worker_operation {WORK_BACKPROP, WORK_GRAD_CALC, WORK_RMSPROP};
-struct worker_thread
+struct optimizer_worker
 {
-    worker_thread(std::shared_ptr<training_weights> weights,
-                  std::shared_ptr<training_weights> g,
-                  std::shared_ptr<training_weights> g_sq,
-                  std::shared_ptr<training_weights> m0,
-                  std::shared_ptr<training_weights> m1,
-                  std::shared_ptr<training_weights> cm0,
-                  std::shared_ptr<training_weights> cm1, int tid, int tc) :
-                  net(weights),
-                  gradient(g),
-                  gradient_sq(g_sq),
-                  first_moment(m0),
-                  second_moment(m1),
-                  corrected_first_moment(cm0),
-                  corrected_second_moment(cm1)
+    optimizer_worker(std::shared_ptr<training_weights> weights,
+                      std::shared_ptr<training_weights> g,
+                      std::shared_ptr<training_weights> g_sq,
+                      std::shared_ptr<training_weights> m0,
+                      std::shared_ptr<training_weights> m1,
+                      std::shared_ptr<training_weights> cm0,
+                      std::shared_ptr<training_weights> cm1, int tid, int tc) :
+                      net(weights),
+                      gradient(g),
+                      gradient_sq(g_sq),
+                      first_moment(m0),
+                      second_moment(m1),
+                      corrected_first_moment(cm0),
+                      corrected_second_moment(cm1)
     {
         thread_id = tid;
         pool_size = tc;
@@ -150,11 +178,12 @@ struct worker_thread
         running = true;
 
         cost = 0;
+        non_skipped_positions = 0;
 
-        t = std::thread(&worker_thread::thread_entry, this);
+        t = std::thread(&optimizer_worker::thread_entry, this);
     }
 
-    ~worker_thread()
+    ~optimizer_worker()
     {
         running = false;
         t.join();
@@ -165,107 +194,43 @@ struct worker_thread
             thread_wait();
 
             if (operation == WORK_BACKPROP) {
-
-                backprop_gradient.zero();
-
-                cost = 0;
-
-                int per_thread = batch_size / pool_size;
-                int start = per_thread * thread_id;
-
-                for (size_t i = start; i < start + per_thread; i++) {
-                    training_position sample = batch[i];
-
-                    float num_of_pieces = pop_count(sample.occupation);
-
-                    //float lambda = std::clamp(1.0f - ((num_of_pieces - 4.0f) / 16.0f), min_lambda, max_lambda);
-
-                    float lambda_weight = std::clamp((num_of_pieces - 4.0f)/28.0f, 0.0f, 1.0f);
-                    float lambda = lambda_weight*min_lambda + (1.0f-lambda_weight)*max_lambda;
-
-                    float result = sample.get_wdl_relative_to_stm();
-
-                    float pred_p = net.evaluate(sample);
-                    float eval_cp = sample.eval;
-
-                    float pred = sigmoid(pred_p  / 4.0f);
-                    float eval = sigmoid(eval_cp / 400.0f);
-
-                    float loss_eval, loss_result, loss_eval_delta, loss_result_delta;
-
-                    loss(pred, eval, loss_eval, loss_eval_delta);
-                    loss(pred, result, loss_result, loss_result_delta);
-
-                    float loss       = loss_eval       * (1.0f-lambda) + loss_result       * lambda;
-                    float loss_delta = loss_eval_delta * (1.0f-lambda) + loss_result_delta * lambda;
-
-                    float sigmoid_delta = pred * (1.0f - pred);
-
-                    back_propagate(net, backprop_gradient, loss_delta*sigmoid_delta, sample.get_turn(), freeze_perspective_weights);
-
-                    cost += loss;
-                }
-
-                backprop_gradient.divide(batch_size);
+                do_backprop();
             } else if (operation == WORK_GRAD_CALC) {
-                gradient->zero(thread_id, pool_size);
-                for (int i = 0; i < grads_to_add.size(); i++) {
-                    gradient->add(*grads_to_add[i], thread_id, pool_size);
-                }
-
-                gradient_sq->squared(*gradient, thread_id, pool_size);
-
-                first_moment->exponential_smoothing(*gradient, beta1, thread_id, pool_size);
-                second_moment->exponential_smoothing(*gradient_sq, beta2, thread_id, pool_size);
-
-                corrected_first_moment->mult(*first_moment, 1.0f / (1.0f - std::pow(beta1, step)), thread_id, pool_size);
-                corrected_second_moment->mult(*second_moment, 1.0f / (1.0f - std::pow(beta2, step)), thread_id, pool_size);
+                do_grad_calc();
             } else if (operation == WORK_RMSPROP) {
-                net.weights->output_weights.rmsprop(&corrected_first_moment->output_weights, &corrected_second_moment->output_weights, learning_rate, weight_decay, thread_id, pool_size);
-
-                net.weights->layer2_weights.rmsprop(&corrected_first_moment->layer2_weights, &corrected_second_moment->layer2_weights, learning_rate, weight_decay, thread_id, pool_size);
-                net.weights->layer1_weights.rmsprop(&corrected_first_moment->layer1_weights, &corrected_second_moment->layer1_weights, learning_rate, weight_decay, thread_id, pool_size);
-
-                if (!freeze_perspective_weights) {
-                    net.weights->perspective_weights.rmsprop(&corrected_first_moment->perspective_weights, &corrected_second_moment->perspective_weights, learning_rate, weight_decay, thread_id, pool_size);
-                }
+                do_rmsprop();
             }
 
             thread_signal_ready();
         }
     }
 
+    void set_params(trainer_params &p)
+    {
+        params = p;
+    }
 
-    void start_backprop(training_position *data, int worker_batch_size, float min_l, float max_l, bool use_factorizer, bool freeze_perspective)
+    void start_backprop(training_position *data)
     {
         operation = WORK_BACKPROP;
 
         batch = data;
-        batch_size = worker_batch_size;
-        min_lambda = min_l;
-        max_lambda = max_l;
-        freeze_perspective_weights = freeze_perspective;
-
-        net.use_factorizer = use_factorizer;
+        net.use_factorizer = params.use_factorized;
 
         begin_signal.signal();
     }
 
-    void start_grad_calc(std::vector<training_weights*> grads, float b1, float b2, int t)
+    void start_grad_calc(std::vector<training_weights*> grads, int t)
     {
         operation = WORK_GRAD_CALC;
         grads_to_add = grads;
-        beta1 = b1;
-        beta2 = b2;
         step = t;
         begin_signal.signal();
     }
 
-    void start_rmsprop(float lr, float wd)
+    void start_rmsprop()
     {
         operation = WORK_RMSPROP;
-        learning_rate = lr;
-        weight_decay = wd;
         begin_signal.signal();
     }
 
@@ -274,7 +239,10 @@ struct worker_thread
         finish_signal.wait();
     }
 
+    float psqt_portion;
+    float ff_sparsity;
     float cost;
+    size_t non_skipped_positions;
 
     training_weights backprop_gradient;
 private:
@@ -282,24 +250,13 @@ private:
 
     std::vector<training_weights*> grads_to_add;
 
-    float learning_rate;
-    float weight_decay;
-    float beta1;
-    float beta2;
-
-    int batch_size;
-    float min_lambda;
-    float max_lambda;
-
-    int step;
-
-    int thread_id;
-    int pool_size;
-
-    bool freeze_perspective_weights;
+    trainer_params params;
 
     std::thread t;
     training_position *batch;
+    int step;
+    int thread_id;
+    int pool_size;
 
     std::atomic<bool> running;
 
@@ -325,173 +282,186 @@ private:
         finish_signal.signal();
     }
 
+
+    void do_backprop()
+    {
+
+        backprop_gradient.zero();
+
+        cost = 0;
+        non_skipped_positions = 0;
+
+        psqt_portion = 0.0f;
+        ff_sparsity = 0.0f;
+
+        int per_thread = params.batch_size / pool_size;
+        int start = per_thread * thread_id;
+
+        int sparsity_sample_count = 0;
+
+        for (size_t i = start; i < start + per_thread; i++) {
+            training_position sample = batch[i];
+
+            if (params.enable_position_skipping && skip_position(sample)) {
+                continue;
+            }
+
+            non_skipped_positions += 1;
+
+            float num_of_pieces = pop_count(sample.occupation);
+
+            float lambda_weight = std::clamp((num_of_pieces - 4.0f)/28.0f, 0.0f, 1.0f);
+            float lambda = lambda_weight*params.min_lambda + (1.0f-lambda_weight)*params.max_lambda;
+
+            float result = sample.get_wdl_relative_to_stm();
+
+            float pred_p = net.evaluate(sample);
+            float eval_cp = sample.eval;
+
+            float pred = sigmoid(pred_p  / 4.0f);
+            float eval = sigmoid(eval_cp / 400.0f);
+
+            if (std::isnan(pred)    || std::isinf(pred) ||
+                std::isnan(eval)    || std::isinf(eval) ||
+                std::isnan(result)  || std::isinf(result))
+            {
+                std::cout << "Warning: bad prediction or label: ";
+                std::cout << "Label (result, eval): (" << result << ", " << eval << ")  Prediction: " << pred << std::endl;
+                continue;
+            }
+
+            psqt_portion += std::abs(net.last_psqt_eval) / (std::abs(net.last_psqt_eval) + std::abs(net.last_pos_eval));
+            if (i % 16 == 0) {
+                ff_sparsity += net.white_side.output_sparsity() + net.black_side.output_sparsity();
+                sparsity_sample_count += 2;
+            }
+
+            float loss_eval, loss_result, loss_eval_delta, loss_result_delta;
+
+            loss(pred, eval, loss_eval, loss_eval_delta);
+            loss(pred, result, loss_result, loss_result_delta);
+
+            float loss       = loss_eval       * (1.0f-lambda) + loss_result       * lambda;
+            float loss_delta = loss_eval_delta * (1.0f-lambda) + loss_result_delta * lambda;
+
+            float sigmoid_delta = pred * (1.0f - pred);
+
+            if (std::isnan(loss)          || std::isinf(loss) ||
+                std::isnan(loss_delta)    || std::isinf(loss_delta) ||
+                std::isnan(sigmoid_delta) || std::isinf(sigmoid_delta))
+            {
+                std::cout << "Warning: bad loss or derivative: ";
+                std::cout << loss << " " << loss_delta << " " << sigmoid_delta << std::endl;
+                continue;
+            }
+
+            net.back_propagate(backprop_gradient, loss_delta*sigmoid_delta, sample.get_turn(), params.freeze_perspective);
+
+            cost += loss;
+        }
+
+        psqt_portion /= non_skipped_positions;
+        ff_sparsity /= sparsity_sample_count;
+
+        backprop_gradient.divide(non_skipped_positions*pool_size);
+    }
+
+    void do_grad_calc()
+    {
+        gradient->zero(thread_id, pool_size);
+        for (int i = 0; i < grads_to_add.size(); i++) {
+            gradient->add(*grads_to_add[i], thread_id, pool_size);
+        }
+
+        gradient_sq->squared(*gradient, thread_id, pool_size);
+
+        first_moment->exponential_smoothing(*gradient, params.beta1, thread_id, pool_size);
+        second_moment->exponential_smoothing(*gradient_sq, params.beta2, thread_id, pool_size);
+
+        corrected_first_moment->mult(*first_moment, 1.0f / (1.0f - std::pow(params.beta1, step)), thread_id, pool_size);
+        corrected_second_moment->mult(*second_moment, 1.0f / (1.0f - std::pow(params.beta2, step)), thread_id, pool_size);
+    }
+
+    void do_rmsprop()
+    {
+        net.weights->output_weights.rmsprop(&corrected_first_moment->output_weights, &corrected_second_moment->output_weights, params.learning_rate, params.weight_decay, thread_id, pool_size);
+
+        net.weights->layer2_weights.rmsprop(&corrected_first_moment->layer2_weights, &corrected_second_moment->layer2_weights, params.learning_rate, params.weight_decay, thread_id, pool_size);
+        net.weights->layer1_weights.rmsprop(&corrected_first_moment->layer1_weights, &corrected_second_moment->layer1_weights, params.learning_rate, params.weight_decay, thread_id, pool_size);
+
+        if (!params.freeze_perspective) {
+            net.weights->perspective_weights.rmsprop(&corrected_first_moment->perspective_weights, &corrected_second_moment->perspective_weights, params.learning_rate, params.weight_decay, thread_id, pool_size);
+        }
+    }
+
+
+
     worker_operation operation;
 };
 
 
-struct worker_thread_pool
+struct optimizer
 {
-    worker_thread_pool(int num_of_workers,  std::shared_ptr<training_weights> weights,
-                                            std::shared_ptr<training_weights> gradient,
-                                            std::shared_ptr<training_weights> gradient_sq,
-                                            std::shared_ptr<training_weights> first_moment,
-                                            std::shared_ptr<training_weights> second_moment,
-                                            std::shared_ptr<training_weights> corrected_first_moment,
-                                            std::shared_ptr<training_weights> corrected_second_moment) {
+    optimizer(int num_of_workers,   std::shared_ptr<training_weights> weights,
+                                    std::shared_ptr<training_weights> gradient,
+                                    std::shared_ptr<training_weights> gradient_sq,
+                                    std::shared_ptr<training_weights> first_moment,
+                                    std::shared_ptr<training_weights> second_moment,
+                                    std::shared_ptr<training_weights> corrected_first_moment,
+                                    std::shared_ptr<training_weights> corrected_second_moment) {
         for (int i = 0; i < num_of_workers; i++) {
-            threads.push_back(new worker_thread(weights, gradient, gradient_sq, first_moment, second_moment, corrected_first_moment, corrected_second_moment, i, num_of_workers));
+            workers.push_back(new optimizer_worker(weights, gradient, gradient_sq, first_moment, second_moment, corrected_first_moment, corrected_second_moment, i, num_of_workers));
         }
         steps = 0;
     }
 
-    ~worker_thread_pool()
+    ~optimizer()
     {
-        for (size_t i = 0; i < threads.size(); i++) {
-            delete threads[i];
+        for (size_t i = 0; i < workers.size(); i++) {
+            delete workers[i];
         }
-        threads.clear();
+        workers.clear();
     }
 
 
-    void step(training_position *batch, int batch_size, float min_lambda, float max_lambda, bool use_factorizer, bool freeze_perspective, float beta1, float beta2, float learning_rate, float weight_decay, float &avg_cost)
+    size_t step(training_position *batch, float &avg_cost, float &psqt_portion, float &ff_sparsity, size_t &non_skipped_positions, trainer_params &params)
     {
+        non_skipped_positions = 0;
+        avg_cost = 0;
+        psqt_portion = 0;
+        ff_sparsity = 0;
         steps++;
 
-        std::for_each(threads.begin(), threads.end(), [batch, batch_size, use_factorizer, min_lambda, max_lambda, freeze_perspective] (auto p) {p->start_backprop(batch, batch_size, min_lambda, max_lambda, use_factorizer, freeze_perspective);});
+        std::for_each(workers.begin(), workers.end(), [&] (auto p) {p->set_params(params); });
+        std::for_each(workers.begin(), workers.end(), [&] (auto p) {p->start_backprop(batch); });
         std::vector<training_weights*> grads_to_add;
-        avg_cost = 0;
-        for (size_t i = 0; i < threads.size(); i++) {
-            threads[i]->wait();
+        for (size_t i = 0; i < workers.size(); i++) {
+            workers[i]->wait();
 
-            grads_to_add.push_back(&threads[i]->backprop_gradient);
+            grads_to_add.push_back(&workers[i]->backprop_gradient);
 
-            avg_cost += threads[i]->cost;
+            avg_cost += workers[i]->cost;
+            non_skipped_positions += workers[i]->non_skipped_positions;
+            psqt_portion += workers[i]->psqt_portion / workers.size();
+            ff_sparsity += workers[i]->ff_sparsity / workers.size();
         }
-        avg_cost /= batch_size;
+        avg_cost /= non_skipped_positions;
 
-        std::for_each(threads.begin(), threads.end(), [grads_to_add, beta1, beta2, this] (auto p) {p->start_grad_calc(grads_to_add, beta1, beta2, steps);});
-        std::for_each(threads.begin(), threads.end(), [] (auto p) {p->wait();});
+        std::for_each(workers.begin(), workers.end(), [&] (auto p) {p->start_grad_calc(grads_to_add, steps);});
+        std::for_each(workers.begin(), workers.end(), [] (auto p) {p->wait();});
+        std::for_each(workers.begin(), workers.end(), [] (auto p) {p->start_rmsprop();});
+        std::for_each(workers.begin(), workers.end(), [] (auto p) {p->wait();});
 
-        std::for_each(threads.begin(), threads.end(), [learning_rate, weight_decay] (auto p) {p->start_rmsprop(learning_rate, weight_decay);});
-        std::for_each(threads.begin(), threads.end(), [] (auto p) {p->wait();});
+        return non_skipped_positions;
     }
 
     int get_pool_size() {
-        return threads.size();
+        return workers.size();
     }
 private:
-    std::vector<worker_thread*> threads;
+    std::vector<optimizer_worker*> workers;
     int steps;
 };
-
-void visualize_net(std::string output_folder, training_weights &weights)
-{
-    int neurons_per_line = 32;
-
-    int neuron_width = 2*8;
-    int neuron_height = 6*8;
-
-    int image_width = neurons_per_line * neuron_width;
-    int image_height = (num_perspective_neurons / neurons_per_line) * neuron_height;
-
-    for (int bucket = 0; bucket < num_of_king_buckets+1; bucket++) {
-
-        uint8_t *image = new uint8_t[image_width*image_height*3];
-
-        for (int neuron = 0; neuron < num_perspective_neurons; neuron++) {
-
-
-            float std_mean = 0;
-            float std_dev = 0;
-            for (int piece = 0; piece < 12; piece++) {
-                for (int square = 0; square < 64; square++) {
-                    int input = bucket*12*64 + square*12 + piece;
-
-                    float f_w = 0.0f;
-                    if (bucket < num_of_king_buckets) {
-                        int f_input = num_of_king_buckets*12*64 + square*12 + piece;
-                        f_w = weights.perspective_weights.weights[f_input*num_perspective_neurons + neuron];
-                    }
-
-                    float w = weights.perspective_weights.weights[input*num_perspective_neurons + neuron] + f_w;
-
-                    std_mean += w;
-                }
-            }
-            std_mean /= 12*64;
-            for (int piece = 0; piece < 12; piece++) {
-                for (int square = 0; square < 64; square++) {
-                    int input = bucket*12*64 + square*12 + piece;
-
-                    float f_w = 0.0f;
-                    if (bucket < num_of_king_buckets) {
-                        int f_input = num_of_king_buckets*12*64 + square*12 + piece;
-                        f_w = weights.perspective_weights.weights[f_input*num_perspective_neurons + neuron];
-                    }
-
-                    float w = weights.perspective_weights.weights[input*num_perspective_neurons + neuron] + f_w;
-
-                    std_dev += w*w;
-                }
-            }
-            std_dev = sqrt(std_dev / (12*64));
-
-            for (int piece = 0; piece < 12; piece++) {
-                for (int square = 0; square < 64; square++) {
-                    int input = bucket*12*64 + square*12 + piece;
-
-                    float f_w = 0.0f;
-                    if (bucket < num_of_king_buckets) {
-                        int f_input = num_of_king_buckets*12*64 + square*12 + piece;
-                        f_w = weights.perspective_weights.weights[f_input*num_perspective_neurons + neuron];
-                    }
-
-                    float w = weights.perspective_weights.weights[input*num_perspective_neurons + neuron] + f_w;
-
-                    float nw = (w - std_mean) / std_dev;
-
-                    int sq_x = square % 8;
-                    int sq_y = square / 8;
-
-                    int black = piece % 2;
-                    int piece_type = piece / 2;
-
-                    int piece_y = piece_type*8;
-                    int piece_x = black*8;
-
-                    int neuron_x = (neuron % neurons_per_line)*neuron_width;
-                    int neuron_y = (neuron / neurons_per_line)*neuron_height;
-
-                    int x = neuron_x + piece_x + sq_x;
-                    int y = neuron_y + piece_y + sq_y;
-
-                    uint8_t lum = static_cast<uint8_t>(std::clamp((nw*0.5f+0.5f)*255.0f, 0.0f, 255.0f));
-
-                    image[(y*image_width + x)*3+0] = lum;
-                    image[(y*image_width + x)*3+1] = lum;
-                    image[(y*image_width + x)*3+2] = lum;
-                }
-            }
-        }
-
-
-
-        std::stringstream ss;
-        ss << output_folder;
-        ss << "/net_bucket_";
-        if (bucket == num_of_king_buckets) {
-            ss << "factorizer";
-        } else {
-            ss << bucket;
-        }
-        ss << ".bmp";
-        bmp_image_utility::save_pixels(ss.str(), image, image_width, image_height, 24);
-
-        delete [] image;
-    }
-}
-
-
 
 void nnue_trainer::test_nets(std::string training_net_file, std::string quantized_net_file, std::vector<selfplay_result> &test_set)
 {
@@ -502,8 +472,6 @@ void nnue_trainer::test_nets(std::string training_net_file, std::string quantize
     std::shared_ptr<training_weights> training_nnue_weights = std::make_shared<training_weights>();
     training_nnue_weights->load_file(training_net_file);
     training_network training_nnue(training_nnue_weights);
-
-    visualize_net("vis", *training_nnue_weights);
 
     training_nnue_weights->save_quantized(quantized_net_file);
 
@@ -530,6 +498,14 @@ void nnue_trainer::test_nets(std::string training_net_file, std::string quantize
     board_state state;
 
     int positions = 0;
+    uint64_t white_act = 0;
+    uint64_t black_act = 0;
+
+
+    float pos_quantization_mse = 0.0f;
+    float psqt_quantization_mse = 0.0f;
+    float worst_pos_quantization_error = 0.0f;
+    float worst_psqt_quantization_error = 0.0f;
 
     std::cout << "Evaluating..." << std::endl;
     for (size_t i = 0; i < test_set.size(); i++) {
@@ -544,6 +520,15 @@ void nnue_trainer::test_nets(std::string training_net_file, std::string quantize
         float qeval = (float)quantized_nnue.evaluate(state) / 100.0f;
         float eval = training_nnue.evaluate(state);
 
+
+        float pos_eval = training_nnue.last_pos_eval;
+        float psqt_eval = training_nnue.last_psqt_eval;
+        float qpos_eval = (float)quantized_nnue.last_pos_eval / 100.0f;
+        float qpsqt_eval = (float)quantized_nnue.last_psqt_eval / 100.0f;
+
+        pos_quantization_mse += (pos_eval - qpos_eval)*(pos_eval - qpos_eval);
+        psqt_quantization_mse += (psqt_eval - qpsqt_eval)*(psqt_eval - qpsqt_eval);
+
         nnue_mse += (real - eval)*(real - eval);
         qnnue_mse += (real - qeval)*(real - qeval);
         avg_error += std::abs(real - eval);
@@ -556,8 +541,14 @@ void nnue_trainer::test_nets(std::string training_net_file, std::string quantize
             black_positions += 1;
         }
 
+        white_act += quantized_nnue.get_perspective(WHITE).num_of_outputs;
+        black_act += quantized_nnue.get_perspective(BLACK).num_of_outputs;
+
         worst_quantization_error = std::max(worst_quantization_error, std::abs(eval - qeval));
         quantization_mse += (eval - qeval)*(eval - qeval);
+
+        worst_pos_quantization_error = std::max(worst_pos_quantization_error, std::abs(pos_eval - qpos_eval));
+        worst_psqt_quantization_error = std::max(worst_psqt_quantization_error, std::abs(psqt_eval - qpsqt_eval));
     }
 
 
@@ -566,6 +557,8 @@ void nnue_trainer::test_nets(std::string training_net_file, std::string quantize
     qnnue_mse = qnnue_mse / positions;
     quantization_mse = quantization_mse / positions;
     avg_error = avg_error / positions;
+    pos_quantization_mse = pos_quantization_mse / positions;
+    psqt_quantization_mse = psqt_quantization_mse / positions;
 
     black_nnue_mse = black_nnue_mse / black_positions;
     white_nnue_mse = white_nnue_mse / white_positions;
@@ -578,12 +571,26 @@ void nnue_trainer::test_nets(std::string training_net_file, std::string quantize
     float white_rmse = sqrt(white_nnue_mse);
 
 
+    float pos_quant_rmse = sqrt(pos_quantization_mse);
+    float psqt_quant_rmse = sqrt(psqt_quantization_mse);
+
 
     std::cout << "NNUE avg error: " << avg_error << std::endl;
-    std::cout << "NNUE rmse: " << nnue_rmse << "  Quantized NNUE rmse: " << qnnue_rmse << std::endl;
-    std::cout << "Quantization rmse: " << quantization_rmse << "   Worst quantization error: " << worst_quantization_error << std::endl;
     std::cout << "White NNUE rmse: " << white_rmse << " Black NNUE rmse: " << black_rmse << std::endl;
+    std::cout << "NNUE rmse: " << nnue_rmse << "  Quantized NNUE rmse: " << qnnue_rmse << std::endl;
+    std::cout << "Quantization rmse: " << quantization_rmse
+              << "\nWorst quantization error: " << worst_quantization_error << std::endl;
+
+
+    float avg_activations = (float)(black_act + white_act) / positions;
+    std::cout << "Average feature transformer sparsity: " << avg_activations*100 / num_perspective_neurons
+              << "% (" << avg_activations << "/" << num_perspective_neurons << ")" << std::endl;
+
+
+    std::cout << std::endl << "Pos quant rmse: " << pos_quant_rmse << "  Psqt quant rmse: " << psqt_quant_rmse << std::endl;
+    std::cout << "Worst pos quant error: " << worst_pos_quantization_error << "  Worst psqt quant error: " << worst_psqt_quantization_error << std::endl;
 }
+
 
 
 
@@ -616,53 +623,59 @@ void training_loop(std::string net_file, std::string qnet_file, std::shared_ptr<
     first_moment->zero();
     second_moment->zero();
 
-    worker_thread_pool thread_pool(16, weights, gradient, gradient_sq, first_moment, second_moment, corrected_first_moment, corrected_second_moment);
+    optimizer opt(16, weights, gradient, gradient_sq, first_moment, second_moment, corrected_first_moment, corrected_second_moment);
 
-    bool use_factorized = true;
-    float learning_rate = 0.0001f;
-    float weight_decay = 0.0001f;
-    float beta1 = 0.9f;
-    float beta2 = 0.999f;
-    int batch_size = 8000*thread_pool.get_pool_size();
-    int epoch_size = 100000000;
-    float min_lambda = 0.2f;
-    float max_lambda = 0.4f;
 
-    bool freeze_perspective = false;
+    trainer_params params;
 
-    float learning_rate_decay = 0.98f;
+    params.use_factorized = true;
+    params.learning_rate = 0.0001f;
+    params.weight_decay = 0.0f;//0.0001f;
+    params.beta1 = 0.9f;
+    params.beta2 = 0.999f;
+    params.batch_size = 8000*opt.get_pool_size();
+    params.epoch_size = 100000000;
+    params.min_lambda = 0.2f;
+    params.max_lambda = 0.4f;
 
-    training_batch_manager batch_manager(batch_size, epoch_size, dataset);
+    params.freeze_perspective = false;
+    params.enable_position_skipping = false;
+
+    params.learning_rate_decay = 0.98f;
+
+    std::cout << std::endl;
+    std::cout << "Dataset size: " << dataset->get_size<training_position>() / (1000*1000) << "M" << std::endl;
+    std::cout << "Beta1: " << params.beta1 << std::endl;
+    std::cout << "Beta2: " << params.beta2 << std::endl;
+    std::cout << "Learning rate: " << params.learning_rate << std::endl;
+    std::cout << "Learning rate decay: " << params.learning_rate_decay << std::endl;
+    std::cout << "Weight decay: " << params.weight_decay << std::endl;
+    std::cout << "Min lambda: " << params.min_lambda << std::endl;
+    std::cout << "Max lambda: " << params.max_lambda << std::endl;
+    std::cout << "Batch size: " << params.batch_size << std::endl;
+    std::cout << "Epoch size: " << params.epoch_size << std::endl;
+    std::cout << "Threads: " << opt.get_pool_size() << std::endl;
+    std::cout << "Enable position skipping: " << params.enable_position_skipping << std::endl;
+    std::cout << "Freeze perspective weights: " << params.freeze_perspective << std::endl << std::endl;
+
+
+    training_batch_manager batch_manager(params.batch_size, params.epoch_size, dataset);
 
     auto t0 = std::chrono::high_resolution_clock::now();
 
     float batch_cost;
     float training_cost = 0.0f;
+    float psqt_portion, ff_sparsity;
 
     int epoch = 0;
-
-    std::cout << std::endl;
-    std::cout << "Dataset size: " << dataset->get_size<training_position>() / (1000*1000) << "M" << std::endl;
-    std::cout << "Beta1: " << beta1 << std::endl;
-    std::cout << "Beta2: " << beta2 << std::endl;
-    std::cout << "Learning rate: " << learning_rate << std::endl;
-    std::cout << "Learning rate decay: " << learning_rate_decay << std::endl;
-    std::cout << "Weight decay: " << weight_decay << std::endl;
-    std::cout << "Min lambda: " << min_lambda << std::endl;
-    std::cout << "Max lambda: " << max_lambda << std::endl;
-    std::cout << "Batch size: " << batch_size << std::endl;
-    std::cout << "Epoch size: " << epoch_size << std::endl;
-    std::cout << "Threads: " << thread_pool.get_pool_size() << std::endl;
-    std::cout << "Freeze perspective weights: " << freeze_perspective << std::endl << std::endl;
+    size_t non_skipped_positions;
 
     while (true) {
         auto t1 = std::chrono::high_resolution_clock::now();
         auto ms = std::chrono::duration_cast<std::chrono::milliseconds>( t1 - t0 );
         t0 = t1;
 
-
         batch_manager.load_new_batch();
-
 
         if (batch_manager.get_epochs() != epoch) {
             epoch = batch_manager.get_epochs();
@@ -670,15 +683,12 @@ void training_loop(std::string net_file, std::string qnet_file, std::shared_ptr<
             weights->save_file(net_file);
             weights->save_quantized(qnet_file);
 
-            visualize_net("vis", *weights);
-
-            learning_rate *= learning_rate_decay;
+            params.learning_rate *= params.learning_rate_decay;
 
             std::cout << "Net saved!" << std::endl;
         }
 
-
-        thread_pool.step(batch_manager.get_current_batch(), batch_size, min_lambda, max_lambda, use_factorized, freeze_perspective, beta1, beta2, learning_rate, weight_decay, batch_cost);
+        opt.step(batch_manager.get_current_batch(), batch_cost, psqt_portion, ff_sparsity, non_skipped_positions, params);
 
         if (training_cost == 0.0f) {
             training_cost = batch_cost;
@@ -686,12 +696,14 @@ void training_loop(std::string net_file, std::string qnet_file, std::shared_ptr<
             training_cost = training_cost * 0.99f + batch_cost * 0.01f;
         }
 
-        float kspers = std::clamp((float)batch_size / ms.count(), 0.0f, 9999.0f);
+        float kspers = std::clamp((float)non_skipped_positions / ms.count(), 0.0f, 9999.0f);
 
         std::cout << "\rTrC: " << std::setprecision(6) << std::left << std::setw(12) << training_cost
                   << "   BC: "  << std::left << std::setw(12) << batch_cost
                   << "   Speed: " << std::right << std::setw(4) << (int)kspers << " KPos/s    "
-                  << "   Epoch: " << batch_manager.get_epochs() << " (" << std::setprecision(3) << std::setw(4) << std::right << (float)batch_manager.get_current_batch_number()*100.0f / batch_manager.get_number_of_batches() << "%)   ";
+                  << "   Epoch: " << batch_manager.get_epochs()
+                  << " (" << std::setprecision(3) << std::setw(4) << std::right << (float)batch_manager.get_current_batch_number()*100.0f / batch_manager.get_number_of_batches() << "%)   "
+                  << "PSQT: " << psqt_portion << "  FF sparsity: " << ff_sparsity << "   " << std::flush;
     }
 
 }
@@ -705,10 +717,6 @@ void nnue_trainer::train(std::string net_file, std::string qnet_file, std::vecto
 
     init_weights(*weights, true);
     weights->load_file(net_file);
-
-    //init_weights(*weights, false);
-
-    visualize_net("vis", *weights);
 
     training_loop(net_file, qnet_file, weights, reader);
 }

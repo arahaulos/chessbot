@@ -19,8 +19,8 @@ enum player_type_t: unsigned char;
 
 struct training_weights
 {
-    training_perspective_weights<num_perspective_inputs + factorizer_inputs, num_perspective_neurons> perspective_weights;
-    training_layer_weights<num_perspective_neurons*2, layer1_neurons, layer_stack_size, false> layer1_weights;
+    training_perspective_weights<num_perspective_inputs + factorizer_inputs, num_perspective_neurons + num_perspective_psqt> perspective_weights;
+    training_layer_weights<num_perspective_neurons, layer1_neurons, layer_stack_size, false> layer1_weights;
     training_layer_weights<layer1_neurons, layer2_neurons, layer_stack_size, false> layer2_weights;
     training_layer_weights<layer2_neurons, 1, layer_stack_size, true> output_weights;
 
@@ -145,16 +145,21 @@ struct training_network
     float evaluate(const board_state &s);
     float evaluate(const training_position &tp);
 
+    void back_propagate(training_weights &grad, float loss_delta, player_type_t stm, bool freeze_perspective);
+
+    float last_psqt_eval;
+    float last_pos_eval;
+
     bool use_factorizer;
 
-    training_perspective<num_perspective_inputs + factorizer_inputs, num_perspective_neurons> black_side;
-    training_perspective<num_perspective_inputs + factorizer_inputs, num_perspective_neurons> white_side;
+    training_perspective<num_perspective_inputs + factorizer_inputs, num_perspective_neurons, num_perspective_psqt> black_side;
+    training_perspective<num_perspective_inputs + factorizer_inputs, num_perspective_neurons, num_perspective_psqt> white_side;
 
-    training_layer<num_perspective_neurons*2, layer1_neurons, layer_stack_size, false> layer1;
+    training_layer<num_perspective_neurons, layer1_neurons, layer_stack_size, false> layer1;
     training_layer<layer1_neurons, layer2_neurons, layer_stack_size, false> layer2;
     training_layer<layer2_neurons, 1, layer_stack_size, true> output_layer;
 
-    std::shared_ptr<training_weights> weights;
+    const std::shared_ptr<training_weights> weights;
 
     int output_bucket;
 };
