@@ -73,3 +73,22 @@ training_position::training_position(const board_state &state, const selfplay_re
 
     encode_best_move(state, spr.bm);
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

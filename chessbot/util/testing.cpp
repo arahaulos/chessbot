@@ -139,7 +139,7 @@ void get_test_workers_results(std::vector<test_worker> &workers, double &s0_dept
 
 
 
-int testing_utility::test(int games, int time, int time_inc, searcher &s0, searcher &s1, int threads, std::string opening_suite, double elo0, double elo1, double alpha, double beta)
+int testing_utility::test(int games, int time, int time_inc, searcher &s0, searcher &s1, int threads, std::string opening_suite, double elo0, double elo1, double alpha, double beta, bool silent)
 {
     std::shared_ptr<std::vector<std::string>> openings = nullptr;
     if (opening_suite != "") {
@@ -159,33 +159,35 @@ int testing_utility::test(int games, int time, int time_inc, searcher &s0, searc
     double lower = std::log(beta / (1 - alpha));
     double upper = std::log((1 - beta) / alpha);
 
-    std::cout << std::endl;
-    std::cout << "Elo0: " << elo0 << std::endl;
-    std::cout << "Elo1: " << elo1 << std::endl;
-    std::cout << "Alpha: " << alpha << std::endl;
-    std::cout << "Beta: " << beta << std::endl;
-    std::cout << "LLR upper limit: " << upper << std::endl;
-    std::cout << "LLR lower limit: " << lower << std::endl;
-    std::cout << "Opening suite: " << opening_suite << " (" << openings->size() << " positions)" << std::endl;
-    std::cout << "Playing " << games << " games with " << (float)time/1000.0f << "s + " << time_inc << "ms" << " time control.  Threads: " << threads << std::endl;
+    if (!silent) {
+        std::cout << std::endl;
+        std::cout << "Elo0: " << elo0 << std::endl;
+        std::cout << "Elo1: " << elo1 << std::endl;
+        std::cout << "Alpha: " << alpha << std::endl;
+        std::cout << "Beta: " << beta << std::endl;
+        std::cout << "LLR upper limit: " << upper << std::endl;
+        std::cout << "LLR lower limit: " << lower << std::endl;
+        std::cout << "Opening suite: " << opening_suite << " (" << openings->size() << " positions)" << std::endl;
+        std::cout << "Playing " << games << " games with " << (float)time/1000.0f << "s + " << time_inc << "ms" << " time control.  Threads: " << threads << std::endl;
+    }
 
     while (agames > 0) {
         get_test_workers_results(workers, s0_depth, s1_depth, s0_nps, s1_nps, elo, wins, draws, losses);
 
         double llr = sprt_llr(elo0, elo1, wins, draws, losses);
 
-        std::cout << "\rD: "    << std::left << std::setw(8) << s0_depth << " " << std::setw(8) << s1_depth
-                  << "  Knps: " << std::setw(8) << s0_nps << " " << std::setw(8) << s1_nps
-                  << "  G: "    << games - agames << "/" << games
-                  << "  R: "    << wins << "/" << draws << "/" << losses
-                  << "  Elo: "  << elo
-                  << "  LLR: "  << llr << "      "
-                  << std::flush;
-
-
-        if (llr < lower || llr > upper) {
-            std::cout << "\nSPRT terminated!" << std::endl;
-            agames = 0;
+        if (!silent) {
+            std::cout << "\rD: "    << std::left << std::setw(8) << s0_depth << " " << std::setw(8) << s1_depth
+                      << "  Knps: " << std::setw(8) << s0_nps << " " << std::setw(8) << s1_nps
+                      << "  G: "    << games - agames << "/" << games
+                      << "  R: "    << wins << "/" << draws << "/" << losses
+                      << "  Elo: "  << elo
+                      << "  LLR: "  << llr << "      "
+                      << std::flush;
+            if (llr < lower || llr > upper) {
+                std::cout << "\nSPRT terminated!" << std::endl;
+                agames = 0;
+            }
         }
 
         std::this_thread::sleep_for(std::chrono::milliseconds(1000));
@@ -199,18 +201,21 @@ int testing_utility::test(int games, int time, int time_inc, searcher &s0, searc
 
     int total = wins + draws + losses;
 
-    std::cout << std::endl << std::endl;
 
-    std::cout << "Wins: " << wins << "(" << (wins*100) / total << "%)" << std::endl;
-    std::cout << "Draws: " << draws << "(" << (draws*100) / total << "%)" << std::endl;
-    std::cout << "Losses: " << losses << "(" << (losses*100) / total << "%)" << std::endl;
+    if (!silent) {
+        std::cout << std::endl << std::endl;
 
-    std::cout << "Elo: " << elo << std::endl;
+        std::cout << "Wins: " << wins << "(" << (wins*100) / total << "%)" << std::endl;
+        std::cout << "Draws: " << draws << "(" << (draws*100) / total << "%)" << std::endl;
+        std::cout << "Losses: " << losses << "(" << (losses*100) / total << "%)" << std::endl;
 
-    std::cout << "Depth0: " << s0_depth << std::endl;
-    std::cout << "Depth1: " << s1_depth << std::endl;
-    std::cout << "Knps0: " << s0_nps << std::endl;
-    std::cout << "Knps1: " << s1_nps << std::endl;
+        std::cout << "Elo: " << elo << std::endl;
+
+        std::cout << "Depth0: " << s0_depth << std::endl;
+        std::cout << "Depth1: " << s1_depth << std::endl;
+        std::cout << "Knps0: " << s0_nps << std::endl;
+        std::cout << "Knps1: " << s1_nps << std::endl;
+    }
 
     return elo;
 }

@@ -125,7 +125,6 @@ bool search_manager::on_end_of_iteration(int d, int seldepth, uint64_t n, pv_tab
     }
 }
 
-
 bool search_manager::on_search_stop_control(uint64_t n)
 {
     nodes = n;

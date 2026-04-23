@@ -26,6 +26,7 @@ struct trainer_params
     float max_lambda;
 
     bool freeze_perspective;
+    bool freeze_l1_weights;
     bool enable_position_skipping;
 
     float learning_rate_decay;
@@ -316,10 +317,10 @@ private:
             float result = sample.get_wdl_relative_to_stm();
 
             float pred_p = net.evaluate(sample);
-            float eval_cp = sample.eval;
+            float eval_p = static_cast<float>(sample.eval) / 100.0f;
 
-            float pred = sigmoid(pred_p  / 4.0f);
-            float eval = sigmoid(eval_cp / 400.0f);
+            float pred = sigmoid(pred_p / 4.0f);
+            float eval = sigmoid(eval_p / 4.0f);
 
             if (std::isnan(pred)    || std::isinf(pred) ||
                 std::isnan(eval)    || std::isinf(eval) ||
@@ -343,7 +344,6 @@ private:
 
             float loss       = loss_eval       * (1.0f-lambda) + loss_result       * lambda;
             float loss_delta = loss_eval_delta * (1.0f-lambda) + loss_result_delta * lambda;
-
             float sigmoid_delta = pred * (1.0f - pred);
 
             if (std::isnan(loss)          || std::isinf(loss) ||
@@ -387,7 +387,10 @@ private:
         net.weights->output_weights.rmsprop(&corrected_first_moment->output_weights, &corrected_second_moment->output_weights, params.learning_rate, params.weight_decay, thread_id, pool_size);
 
         net.weights->layer2_weights.rmsprop(&corrected_first_moment->layer2_weights, &corrected_second_moment->layer2_weights, params.learning_rate, params.weight_decay, thread_id, pool_size);
-        net.weights->layer1_weights.rmsprop(&corrected_first_moment->layer1_weights, &corrected_second_moment->layer1_weights, params.learning_rate, params.weight_decay, thread_id, pool_size);
+
+        if (!params.freeze_l1_weights) {
+            net.weights->layer1_weights.rmsprop(&corrected_first_moment->layer1_weights, &corrected_second_moment->layer1_weights, params.learning_rate, params.weight_decay, thread_id, pool_size);
+        }
 
         if (!params.freeze_perspective) {
             net.weights->perspective_weights.rmsprop(&corrected_first_moment->perspective_weights, &corrected_second_moment->perspective_weights, params.learning_rate, params.weight_decay, thread_id, pool_size);
@@ -623,22 +626,24 @@ void training_loop(std::string net_file, std::string qnet_file, std::shared_ptr<
     first_moment->zero();
     second_moment->zero();
 
-    optimizer opt(16, weights, gradient, gradient_sq, first_moment, second_moment, corrected_first_moment, corrected_second_moment);
+    optimizer opt(8, weights, gradient, gradient_sq, first_moment, second_moment, corrected_first_moment, corrected_second_moment);
 
 
     trainer_params params;
 
     params.use_factorized = true;
     params.learning_rate = 0.0001f;
-    params.weight_decay = 0.0f;//0.0001f;
+    params.weight_decay = 0.01f;//0.0f;
     params.beta1 = 0.9f;
     params.beta2 = 0.999f;
-    params.batch_size = 8000*opt.get_pool_size();
+    params.batch_size = 32000*opt.get_pool_size();
     params.epoch_size = 100000000;
     params.min_lambda = 0.2f;
     params.max_lambda = 0.4f;
 
     params.freeze_perspective = false;
+    params.freeze_l1_weights = false;
+
     params.enable_position_skipping = false;
 
     params.learning_rate_decay = 0.98f;
@@ -656,8 +661,8 @@ void training_loop(std::string net_file, std::string qnet_file, std::shared_ptr<
     std::cout << "Epoch size: " << params.epoch_size << std::endl;
     std::cout << "Threads: " << opt.get_pool_size() << std::endl;
     std::cout << "Enable position skipping: " << params.enable_position_skipping << std::endl;
-    std::cout << "Freeze perspective weights: " << params.freeze_perspective << std::endl << std::endl;
-
+    std::cout << "Freeze perspective weights: " << params.freeze_perspective << std::endl;
+    std::cout << "Freeze L1 weights: " << params.freeze_l1_weights << std::endl << std::endl;
 
     training_batch_manager batch_manager(params.batch_size, params.epoch_size, dataset);
 

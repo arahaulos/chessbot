@@ -18,7 +18,6 @@ struct training_position
     training_position(const selfplay_result &spr);
     training_position(const board_state &state, const selfplay_result &spr);
 
-
     uint8_t iterate_pieces(uint64_t &occ, int &index, int &sq_index) const
     {
         uint8_t p;

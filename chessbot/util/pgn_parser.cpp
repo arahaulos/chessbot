@@ -1,6 +1,8 @@
+#include <sstream>
+
 #include "pgn_parser.hpp"
 #include "../state.hpp"
-
+#include "../movegen.hpp"
 
 size_t find_end_of_parentheses(size_t pos, char start_symbol, char end_symbol, std::string &str)
 {
@@ -250,8 +252,8 @@ std::vector<std::string> pgn_parser::parse_games(std::string pgn_text)
     }
 
     return games;
-
 }
+
 
 std::vector<pgn_tag> pgn_parser::parse_tags(std::string pgn_text)
 {
@@ -302,6 +304,184 @@ std::string pgn_parser::get_tag_value(const std::vector<pgn_tag> &tags, std::str
     return "";
 }
 
+void pgn_parser::set_tag_value(std::vector<pgn_tag> &tags, std::string tag_name, std::string tag_value)
+{
+    for (size_t i = 0; i < tags.size(); i++) {
+        if (tags[i].first == tag_name) {
+            tags[i].second = tag_value;
+            return;
+        }
+    }
+    tags.emplace_back(tag_name, tag_value);
+}
+
+
+
+std::string pgn_parser::generate_san(board_state &state, chess_move mov)
+{
+    std::stringstream ss;
+
+    if (mov.is_castling()) {
+        if (mov.to.get_x() == 6) {
+            ss << "O-O";
+        } else {
+            ss << "O-O-O";
+        }
+    } else {
+
+        piece_type_t piece = mov.get_moving_piece().get_type();
+
+        static const char *files = "abcdefgh";
+        static const char *ranks = "87654321";
+        static const char *pieces = "NBRQK";
+
+        if (piece >= KNIGHT) {
+            ss << pieces[piece-KNIGHT];
+        }
+
+        bool same_target = false;
+        bool same_file = false;
+        bool same_rank = false;
+
+        std::vector<chess_move> legal_moves = state.get_all_legal_moves(state.get_turn());
+
+        for (size_t i = 0; i < legal_moves.size(); i++) {
+            if (legal_moves[i].from == mov.from) {
+                continue;
+            }
+            if (legal_moves[i].to == mov.to && piece == legal_moves[i].get_moving_piece().get_type()) {
+                same_file |= legal_moves[i].from.get_x() == mov.from.get_x();
+                same_rank |= legal_moves[i].from.get_y() == mov.from.get_y();
+
+                same_target = true;
+            }
+        }
+
+        bool write_file = false;
+        bool write_rank = false;
+
+        if (same_target && !same_file) {
+            write_file = true;
+        } else if (same_target && !same_rank) {
+            write_rank = true;
+        } else if (same_file && same_rank) {
+            write_file = true;
+            write_rank = true;
+        }
+
+        if (piece == PAWN && mov.is_capture()) {
+            write_file = true;
+        }
+
+        if (write_file) {
+            ss << files[mov.from.get_x()];
+        }
+        if (write_rank) {
+            ss << ranks[mov.from.get_y()];
+        }
+        if (mov.is_capture()) {
+            ss << "x";
+        }
+
+        ss << mov.to.to_uci();
+
+        if (mov.is_promotion()) {
+            ss << "=";
+            ss << pieces[mov.promotion-KNIGHT];
+        }
+    }
+
+    if (state.causes_check(mov, next_turn(state.get_turn()))) {
+        unmake_restore restore = state.make_move(mov);
+
+        bool is_checkmate = (state.count_legal_moves(state.get_turn()) == 0);
+
+        state.unmake_move(mov, restore);
+
+        ss << (is_checkmate ? '#' : '+');
+    }
+
+    return ss.str();
+}
+
+
+std::string pgn_parser::generate_pgn(const std::vector<pgn_tag> &tags, const std::vector<chess_move> &moves, std::string startpos)
+{
+
+    std::string result = "*";
+
+    if (get_tag_value(tags, "Result") != "") {
+        result = get_tag_value(tags, "Result");
+    }
+
+    std::stringstream pgn_ss;
+    std::stringstream moves_ss;
+
+    board_state state;
+
+    if (startpos.length() > 0) {
+        state.load_fen(startpos);
+    } else {
+        state.set_initial_state();
+    }
+
+    for (size_t i = 0; i < moves.size(); i++) {
+        chess_move mov = moves[i];
+
+        mov.encoded_pieces = move_generator::encode_move_pieces(state, mov);
+
+        if (i % 2 == 0) {
+            moves_ss << i/2 + 1 << ".";
+        }
+
+        std::string san = generate_san(state, mov);
+
+        moves_ss << san;
+        if (i > 0 && (i % 16) == 0) {
+            moves_ss << "\n";
+        } else {
+            moves_ss << " ";
+        }
+
+        state.make_move(mov);
+
+        if (san[san.length()-1] == '#') {
+            if (state.get_turn() == BLACK) {
+                result = "1-0"; //Black gets mated. White wins
+            } else {
+                result = "0-1"; //White gets mated. Black wins
+            }
+        } else {
+            if (state.count_legal_moves(state.get_turn()) == 0) {
+                result = "1/2-1/2"; //Stalemate. Automatic draw
+            }
+            //Other draw types must be claimed (50 move rule and three fold repetition)
+        }
+    }
+
+    std::vector<pgn_tag> write_tags = tags;
+
+    set_tag_value(write_tags, "Result", result);
+    if (startpos != "") {
+        set_tag_value(write_tags, "FEN", startpos);
+    }
+
+    for (std::string tag : {"Event", "Site", "Date", "Round", "White", "Black", "Result"}) {
+        if (get_tag_value(write_tags, tag) == "") {
+            set_tag_value(write_tags, tag, "?");
+        }
+    }
+
+    for (auto& [tag_name, tag_value] : write_tags) {
+        pgn_ss << "[" << tag_name << " \"" << tag_value << "\"]\n";
+    }
+
+    pgn_ss << "\n" << moves_ss.str() << " " << result << "\n";
+
+    return pgn_ss.str();
+}
+
+
 std::string pgn_parser::read_text_file(std::string path)
 {
     std::string lines = "";
@@ -313,6 +493,19 @@ std::string pgn_parser::read_text_file(std::string path)
         }
     }
     return lines;
+}
+
+
+int pgn_parser::write_text_file(std::string path, const std::string &text)
+{
+    std::ofstream file(path);
+    if (file.is_open()) {
+        file << text;
+
+        return 0;
+    }
+
+    return -1;
 }
 
 

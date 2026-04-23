@@ -9,6 +9,8 @@
 #include <iomanip>
 
 #include "misc.hpp"
+#include "testing.hpp"
+
 #include "../search_manager.hpp"
 
 
@@ -60,7 +62,6 @@ void datagen_worker::play(std::atomic<int> &games, int d, int n, std::shared_ptr
 
     search->set_shared_weights(weights);
 
-
     game_state game;
 
     int num_of_first_moves = 0;
@@ -86,8 +87,9 @@ void datagen_worker::play(std::atomic<int> &games, int d, int n, std::shared_ptr
         int moves = 0;
 
         while (true) {
-            sman->prepare_depth_nodes_search(d, n);
             if (random_moves > 0) {
+                sman->prepare_depth_nodes_search(std::max(d-3, 0), n);
+
                 std::vector<chess_move> acceptable_moves;
                 if (!multi_pv_opening) {
                     acceptable_moves = game.get_state().get_all_legal_moves(game.get_state().get_turn());
@@ -124,6 +126,8 @@ void datagen_worker::play(std::atomic<int> &games, int d, int n, std::shared_ptr
                 }
 
             } else {
+                sman->prepare_depth_nodes_search(d, n);
+
                 if (search->get_multi_pv() != 1) {
                     search->set_multi_pv(1);
                 }
@@ -327,3 +331,30 @@ void training_datagen::datagen(std::string output_file, std::string nnue_file, i
 
     save_selfplay_results(results, output_file);
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

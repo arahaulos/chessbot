@@ -196,7 +196,7 @@ private:
 
 struct tuner_worker
 {
-    tuner_worker(int base_time, int time_inc, int N, std::shared_ptr<std::vector<float>> p, std::shared_ptr<std::atomic<int>> g, std::vector<std::string> ptt, std::shared_ptr<std::vector<std::string>> opening_suite)
+    tuner_worker(int base_time, int time_inc, int N, int gp_per_match, std::shared_ptr<std::vector<float>> p, std::shared_ptr<std::atomic<int>> g, std::vector<std::string> ptt, std::shared_ptr<std::vector<std::string>> opening_suite)
     {
         static int worker_count = 0;
         worker_id = worker_count;
@@ -205,6 +205,7 @@ struct tuner_worker
         games_left = g;
         params = p;
         params_to_tune = ptt;
+        game_pairs_per_match = gp_per_match;
 
         openings = opening_suite;
 
@@ -263,11 +264,17 @@ struct tuner_worker
                 s1.sp.data[i] = std::round(params1[i]);
             }
 
-            std::string opening_fen = (*openings)[rand() % openings->size()];
+            int32_t result = 0;
 
-            return play_game_pair(s0, s1, opening_fen, base_time, time_inc, rand()&0x1, stats);
+            for (int i = 0; i < game_pairs_per_match; i++) {
+                //result += test_model.simulate_match(params0, params1, 0.5, 2);
 
-            //return test_model.simulate_match(params0, params1, 0.5, 2);
+                std::string opening_fen = (*openings)[rand() % openings->size()];
+
+                result += play_game_pair(s0, s1, opening_fen, base_time, time_inc, rand()&0x1, stats);
+            }
+
+            return result;
         };
 
         auto rand_perturbation_vec = [this] (std::vector<float> &vec) {
@@ -322,10 +329,8 @@ struct tuner_worker
 
             (*games_left) -= 1;
 
-            /*if ((k % 100) == 0) {
-                std::cout << test_model.get_maximum_strength() << " " << test_model.get_strength(*params) << std::endl;
-            }*/
-
+            //if (worker_id == 0)
+            //std::cout << test_model.get_strength(*params) << " " << test_model.get_maximum_strength() << std::endl;
         }
     }
     int worker_id;
@@ -335,6 +340,8 @@ struct tuner_worker
     std::shared_ptr<std::atomic<int>> games_left;
     std::shared_ptr<std::vector<float>> params;
     std::shared_ptr<std::vector<std::string>> openings;
+
+    int game_pairs_per_match;
 };
 
 
@@ -373,7 +380,7 @@ int read_tuning_file(std::string tuning_file, std::vector<float> &params)
 }
 
 
-void tuning_utility::tune_search_params(int time, int time_inc, int threads, int num_of_games, std::string output_file, const std::vector<std::string> &params_to_tune, std::string opening_suite)
+void tuning_utility::tune_search_params(int time, int time_inc, int threads, int num_of_matches, int game_pair_per_match, std::string output_file, const std::vector<std::string> &params_to_tune, std::string opening_suite)
 {
     std::shared_ptr<std::vector<std::string>> openings = nullptr;
     if (opening_suite != "") {
@@ -383,16 +390,16 @@ void tuning_utility::tune_search_params(int time, int time_inc, int threads, int
     search_params default_params;
 
     std::shared_ptr<std::vector<float>> params = std::make_shared<std::vector<float>>();
-    std::shared_ptr<std::atomic<int>> games_left = std::make_shared<std::atomic<int>>(num_of_games);
+    std::shared_ptr<std::atomic<int>> games_left = std::make_shared<std::atomic<int>>(num_of_matches);
     for (int i = 0; i < default_params.num_of_params(); i++) {
         params->push_back((float)default_params.data[i]);
     }
 
-    *games_left = num_of_games - read_tuning_file(output_file, *params);
+    *games_left = num_of_matches - read_tuning_file(output_file, *params);
 
     std::vector<std::unique_ptr<tuner_worker>> workers;
     for (int i = 0; i < threads; i++) {
-        workers.push_back(std::make_unique<tuner_worker>(time, time_inc, num_of_games, params, games_left, params_to_tune, openings));
+        workers.push_back(std::make_unique<tuner_worker>(time, time_inc, num_of_matches, game_pair_per_match, params, games_left, params_to_tune, openings));
     }
 
     std::chrono::high_resolution_clock::time_point last_save_time = std::chrono::high_resolution_clock::now();
@@ -424,7 +431,7 @@ void tuning_utility::tune_search_params(int time, int time_inc, int threads, int
             minutes_left = (time_left - (double)hours_left)*60;
         }
 
-        std::cout << "\rTuning " << num_of_games - *games_left << "/" << num_of_games
+        std::cout << "\rTuning " << num_of_matches - *games_left << "/" << num_of_matches
                   << "  Speed: " << (int)games_per_hour
                   << " games/hour   Est: " << hours_left << "h " << minutes_left << "min         "
                   << std::flush;
@@ -434,7 +441,7 @@ void tuning_utility::tune_search_params(int time, int time_inc, int threads, int
 
             std::ofstream file(output_file, std::ios::app);
             if (file.is_open()) {
-                file << "\n\nPlayed: " << num_of_games - *games_left << "\n";
+                file << "\n\nPlayed: " << num_of_matches - *games_left << "\n";
 
                 int num_of_params = sizeof(search_params) / sizeof(int32_t);
                 for (int j = 0; j < num_of_params; j++) {

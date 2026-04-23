@@ -499,6 +499,10 @@ struct move_generator
         int c = history_table.get_killers(movelist, ply);
 
         for (int i = 0; i < c; i++) {
+            bool is_promotion = (movelist[i].promotion != 0) || (state.get_square(movelist[i].from).get_type() == PAWN && (movelist[i].to.get_y() == 0 || movelist[i].to.get_y() == 7));
+            bool is_en_passant = state.get_square(movelist[i].from).get_type() == PAWN && movelist[i].to == state.en_passant_square && (state.flags & EN_PASSANT_AVAILABLE) != 0;
+            bool is_capture = state.get_square(movelist[i].to).get_type() != EMPTY;
+
             bool dublicate = false;
             for (int j = 0; j < i; j++) {
                 if (movelist[i] == movelist[j]) {
@@ -506,20 +510,11 @@ struct move_generator
                     break;
                 }
             }
-            if (dublicate) {
-                std::swap(movelist[i], movelist[c-1]);
-                c--; i--;
-                continue;
-            }
-
-            bool is_promotion = (movelist[i].promotion != 0) || (state.get_square(movelist[i].from).get_type() == PAWN && (movelist[i].to.get_y() == 0 || movelist[i].to.get_y() == 7));
-            bool is_en_passant = state.get_square(movelist[i].from).get_type() == PAWN && movelist[i].to == state.en_passant_square && (state.flags & EN_PASSANT_AVAILABLE) != 0;
-            bool is_capture = state.get_square(movelist[i].to).get_type() != EMPTY;
 
             movelist[i].promotion = EMPTY;
             movelist[i].encoded_pieces = chess_move::encode_moving_piece(state.get_square(movelist[i].from));
 
-            if (!is_move_valid(state, movelist[i]) || is_en_passant || is_promotion || is_capture) {
+            if (dublicate || is_en_passant || is_promotion || is_capture || !is_move_valid(state, movelist[i])) {
                 std::swap(movelist[i], movelist[c-1]);
                 c--;
                 i--;

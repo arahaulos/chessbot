@@ -3,17 +3,6 @@
 #include <sstream>
 #include "util/wdl_model.hpp"
 
-int32_t scale_eval(int32_t score)
-{
-    constexpr int scaling_factor = 719;
-
-    if (!is_mate_score(score)) {
-        return (score * 400) / scaling_factor;
-    } else {
-        return score;
-    }
-}
-
 
 std::vector<std::string> split_string(std::string str, char d)
 {
@@ -394,7 +383,9 @@ void uci_interface::iteration_end()
             search_result info = search_man->get_iteration_result(i);
 
             for (int j = 0; j < multi_pv; j++) {
-                int32_t eval = scale_eval(info.lines[j]->score);
+                //int32_t eval = scale_eval(info.lines[j]->score);
+
+                int32_t eval = wdl_model::normalize_score(game_instance->get_state(), info.lines[j]->score);
 
                 if (info.lines[j]->score == MIN_EVAL) {
                     continue;

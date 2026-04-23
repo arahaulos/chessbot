@@ -274,6 +274,8 @@ void nnue_weights::load(std::string path)
 
         delete [] encoded_data;
         delete [] decoded_data;
+    } else {
+        std::cout << "Failed to open file: " << path << std::endl;
     }
     file.close();
 }
@@ -304,6 +306,8 @@ void nnue_weights::save(std::string path)
 
         delete [] encoded_data;
         delete [] raw_data;
+    } else {
+        std::cout << "Failed to open file: " << path << std::endl;
     }
     file.close();
 }

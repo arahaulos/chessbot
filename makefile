@@ -1,6 +1,6 @@
-CXX = g++
+CXX = clang++
 
-CXXFLAGS = -Wall -Wextra -std=c++17 -O3 -s -m64 -march=native -funroll-loops
+CXXFLAGS = -Wall -std=c++17 -O3 -s -m64 -march=native -funroll-loops
 LDFLAGS = -static -static-libgcc -static-libstdc++
 
 ifeq ($(OS),Windows_NT)

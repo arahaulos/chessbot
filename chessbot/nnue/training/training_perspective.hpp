@@ -80,13 +80,26 @@ struct training_perspective_weights
         stream.read((char*)biases, NEURONS*sizeof(float));
 
         for (size_t i = 0; i < NEURONS*INPUTS; i++) {
+            bool is_psqt = ((i % NEURONS) >= num_perspective_neurons);
+
             if (std::isinf(weights[i]) || std::isnan(weights[i])) {
                 std::cout << "Warning: loading net which have bad weight value: " << weights[i] << std::endl;
+            }
+
+            if (!is_psqt && (weights[i] > halfkp_quantization_clamp_max || weights[i] < halfkp_quantization_clamp_min)) {
+                std::cout << "Warning: unclamped weight: " << weights[i] << std::endl;
+            }
+            if (is_psqt && (weights[i] > psqt_clamp_max || weights[i] < psqt_clamp_min)) {
+                std::cout << "Warning: unclamped weight (PSQT): " << weights[i] << std::endl;
             }
         }
         for (size_t i = 0; i < NEURONS; i++) {
             if (std::isinf(biases[i])) {
                 std::cout << "Warning: loading net which have bad weight value: " << biases[i] << std::endl;
+            }
+
+            if (biases[i] > halfkp_quantization_clamp_max || biases[i] < halfkp_quantization_clamp_min) {
+                std::cout << "Warning: unclamped bias: " << biases[i] << std::endl;
             }
         }
     }
@@ -154,8 +167,8 @@ struct training_perspective_weights
         __m256 lr = _mm256_set1_ps(learning_rate);
         __m256 wd = _mm256_set1_ps(weight_decay);
 
-        int per_thread = INPUTS*NEURONS / tc;
-        int start = per_thread*tid;
+        int per_thread, start;
+        split_work(tid, tc, INPUTS*NEURONS, per_thread, start);
 
         for (int i = start; i < start + per_thread; i += 8) {
             int n = i % NEURONS;

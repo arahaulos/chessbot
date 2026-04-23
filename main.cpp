@@ -38,15 +38,19 @@ void test_search()
 
 void train()
 {
-    //training_data_utility::convert_training_data({"tuning/selfplays_S14M_2"}, "tuning/data_S14M_2", 1024);
-    nnue_trainer::train("nn776x2-pwm-psqt-8ls.nnue", "qnn776x2-pwm-psqt-8ls.nnue",   {//"tuning/data8", "tuning/data9", "tuning/data10", "tuning/data11",
-                                                                                      //"tuning/data12", "tuning/data13",
-                                                                                      //"tuning/data14", "tuning/data15",
-                                                                                      "tuning/data16",  "tuning/data17",
-                                                                                      "tuning/data_UHO_1", "tuning/data_UHO_2", "tuning/data_UHO_3", "tuning/data_UHO_4", "tuning/data_UHO_5",
-                                                                                      "tuning/data_N4M_1",
-                                                                                      "tuning/data_S14M_1", "tuning/data_S14M_2"});//*/
+    //training_data_utility::convert_training_data({"tuning/selfplays_R8_1"}, "tuning/data_R8_1", 1024);
 
+    nnue_trainer::train("nn776x2-pwm-psqt-8ls.nnue", "qnn776x2-pwm-psqt-8ls.nnue",   {//"tuning/data8", "tuning/data9", "tuning/data10", "tuning/data11",
+                                                                                       //"tuning/data12", "tuning/data13",
+                                                                                       //"tuning/data14", "tuning/data15",
+                                                                                       "tuning/data16",  "tuning/data17",
+                                                                                       "tuning/data_UHO_1", "tuning/data_UHO_2", "tuning/data_UHO_3", "tuning/data_UHO_4", "tuning/data_UHO_5",
+                                                                                       "tuning/data_N4M_1", "tuning/data_UHO_6", "tuning/data_UHO_7",
+                                                                                       "tuning/data_S14M_1", "tuning/data_S14M_2",
+                                                                                       "tuning/data_S12M_1", "tuning/data_S12M_2",
+                                                                                       "tuning/data_R8_1"});//*/
+
+    //nnue_trainer::train("nn776x2-pwm-psqt-8ls.nnue", "qnn776x2-pwm-psqt-8ls.nnue",   {"tuning/data_nodes_100k"});
 }
 
 void tune_search()
@@ -64,7 +68,7 @@ void tune_search()
         "good_quiet_treshold"
     };
 
-    tuning_utility::tune_search_params(2000, 50, 16, 200000, "tuning.txt", params, "tuning/UHO_4060_v4.epd");
+    tuning_utility::tune_search_params(2000, 50, 16, 100000, 4, "tuning.txt", params, "tuning/UHO_4060_v4.epd");
 }
 
 void test_net()
@@ -75,21 +79,29 @@ void test_net()
     nnue_trainer::test_nets("nn776x2-pwm-psqt-8ls.nnue", "qnn776x2-pwm-psqt-8ls.nnue", data);
 }
 
+
 int main()
 {
     global_init();
     print_info();
 
     //tune_search();
+
     //train();
     //test_search();
     //test_net();
 
+
     std::unique_ptr<application> app = std::make_unique<application>();
     //app->run_benchmark();
+
     app->run();
+
     //app->run_tests();
-    //app->datagen("tuning/selfplays_UHO_6", "", "tuning/UHO_Lichess_4852_v1.epd", 28, 8, 6000, true, 6, 32000, 1000);
+    //app->datagen("tuning/selfplays_R8_1", "", "", 28, 8, 6000, false, 8, 32000, 1000);
+
+
+    //app->datagen("tuning/selfplays_nodes_100k", "", "", 28, 12, 100000, true, 8, 8000, 1000);
 
     return 0;
 }

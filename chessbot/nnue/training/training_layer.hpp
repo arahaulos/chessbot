@@ -15,19 +15,33 @@ T* align_ptr(T *buffer_ptr)
     return (T*)(ptr + 64 - (ptr % 64));
 }
 
+inline void split_work(int tid, int tc, int N, int &per_thread, int &start)
+{
+    if (N < 1024) {
+        if (tid == 0) {
+            start = 0;
+            per_thread = N;
+        } else {
+            per_thread = 0;
+            start = 0;
+        }
+        return;
+    }
+    per_thread = N / tc;
+    per_thread -= (per_thread % 8);
+    start = per_thread * tid;
+
+    if (tid == tc-1) {
+        per_thread = N - start;
+    }
+}
+
 
 template <int N>
 inline void copy_vectorized(float *ov, const float *av, int tid, int tc)
 {
-    if (N < 1024) {
-        if (tid == 0) {
-            tc = 1;
-        } else {
-            return;
-        }
-    }
-    int per_thread = N / tc;
-    int start = per_thread * tid;
+    int per_thread, start;
+    split_work(tid, tc, N, per_thread, start);
 
     #if USE_AVX2
 
@@ -47,15 +61,8 @@ inline void copy_vectorized(float *ov, const float *av, int tid, int tc)
 template <int N>
 inline void add_vectorized(float *ov, const float *av, const float *bv, int tid, int tc)
 {
-    if (N < 1024) {
-        if (tid == 0) {
-            tc = 1;
-        } else {
-            return;
-        }
-    }
-    int per_thread = N / tc;
-    int start = per_thread * tid;
+    int per_thread, start;
+    split_work(tid, tc, N, per_thread, start);
 
     #if USE_AVX2
 
@@ -78,16 +85,8 @@ inline void add_vectorized(float *ov, const float *av, const float *bv, int tid,
 template <int N>
 inline void mult_vectorized(float *ov, const float *av, const float *bv, int tid, int tc)
 {
-    if (N < 1024) {
-        if (tid == 0) {
-            tc = 1;
-        } else {
-            return;
-        }
-    }
-
-    int per_thread = N / tc;
-    int start = per_thread * tid;
+    int per_thread, start;
+    split_work(tid, tc, N, per_thread, start);
 
     #if USE_AVX2
 
@@ -112,16 +111,8 @@ inline void mult_vectorized(float *ov, const float *av, const float *bv, int tid
 template <int N>
 inline void mult_vectorized(float *ov, const float *av, float value, int tid, int tc)
 {
-    if (N < 1024) {
-        if (tid == 0) {
-            tc = 1;
-        } else {
-            return;
-        }
-    }
-
-    int per_thread = N / tc;
-    int start = per_thread * tid;
+    int per_thread, start;
+    split_work(tid, tc, N, per_thread, start);
 
     #if USE_AVX2
 
@@ -146,16 +137,8 @@ inline void mult_vectorized(float *ov, const float *av, float value, int tid, in
 template <int N>
 inline void set_vectorized(float *ov, float value, int tid, int tc)
 {
-    if (N < 1024) {
-        if (tid == 0) {
-            tc = 1;
-        } else {
-            return;
-        }
-    }
-
-    int per_thread = N / tc;
-    int start = per_thread * tid;
+    int per_thread, start;
+    split_work(tid, tc, N, per_thread, start);
 
     #if USE_AVX2
 
@@ -178,16 +161,8 @@ inline void set_vectorized(float *ov, float value, int tid, int tc)
 template <int N>
 inline void ema_vectorized(float *ov, float *av, float val, int tid, int tc)
 {
-    if (N < 1024) {
-        if (tid == 0) {
-            tc = 1;
-        } else {
-            return;
-        }
-    }
-
-    int per_thread = N / tc;
-    int start = per_thread * tid;
+    int per_thread, start;
+    split_work(tid, tc, N, per_thread, start);
 
     #if USE_AVX2
 
@@ -441,8 +416,8 @@ struct training_layer_weights
         __m256 lr = _mm256_set1_ps(learning_rate);
         __m256 wd = _mm256_set1_ps(weight_decay);
 
-        int per_thread = INPUTS*NEURONS*STACK_SIZE / tc;
-        int start = per_thread*tid;
+        int per_thread, start;
+        split_work(tid, tc, INPUTS*NEURONS*STACK_SIZE, per_thread, start);
 
         for (int i = start; i < start + per_thread; i += 8) {
             __m256 w = _mm256_load_ps(&weights[i]);
