@@ -1,5 +1,6 @@
 #pragma once
 
+#include "state.hpp"
 
 inline int32_t static_exchange_evaluation(board_state &state, chess_move m)
 {

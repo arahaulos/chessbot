@@ -16,10 +16,10 @@ struct search_iteration_result
 struct time_manager
 {
     time_manager();
-    time_manager(int tleft, int tinc);
+    time_manager(int tleft, int tinc, int ply);
 
     static int get_default_overhead();
-    void init(int tleft, int tinc);
+    void init(int tleft, int tinc, int ply);
 
     bool end_of_iteration(int depth, chess_move bm, int32_t eval, int32_t time);
 
@@ -38,14 +38,16 @@ struct time_manager
 
     bool test_flag;
 private:
-    int move_overhead;
-    int time_left;
-    int time_inc;
+    float move_overhead;
+    float time_left;
+    float time_inc;
 
     std::vector<search_iteration_result> iterations;
 
-    int target_time;
-    int max_time;
+    float target_time;
+    float max_time;
 
-    int time_used;
+    float time_used;
+
+    float opening_factor;
 };

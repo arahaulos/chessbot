@@ -14,7 +14,7 @@ struct search_result
     int depth;
     int seldepth;
 
-    std::vector<std::shared_ptr<pv_table>> lines;
+    std::vector<pv_table> lines;
     uint64_t time_ms;
     uint64_t nodes;
 };
@@ -50,7 +50,7 @@ struct search_manager
         std::lock_guard<std::mutex> guard(results_lock);
 
         if (results.size() > 0) {
-            return results.back().nodes;
+            return results.back()->nodes;
         }
         return 0;
     }
@@ -59,7 +59,7 @@ struct search_manager
         std::lock_guard<std::mutex> guard(results_lock);
 
         if (results.size() > 0) {
-            return results.back().seldepth;
+            return results.back()->seldepth;
         }
         return 0;
     }
@@ -69,7 +69,7 @@ struct search_manager
         std::lock_guard<std::mutex> guard(results_lock);
 
         if (results.size() > 0) {
-            return results.back().lines[pv_num]->moves[0];
+            return results.back()->lines[pv_num].moves[0];
         }
         return chess_move::null_move();
     }
@@ -79,7 +79,7 @@ struct search_manager
         std::lock_guard<std::mutex> guard(results_lock);
 
         if (results.size() > 0) {
-            return results.back().lines[pv_num]->score;
+            return results.back()->lines[pv_num].score;
         }
         return 0;
     }
@@ -89,7 +89,7 @@ struct search_manager
         std::lock_guard<std::mutex> guard(results_lock);
 
         if (results.size() > 0) {
-            pv_out = *results.back().lines[pv_num];
+            pv_out = results.back()->lines[pv_num];
         }
     }
 
@@ -98,7 +98,7 @@ struct search_manager
         std::lock_guard<std::mutex> guard(results_lock);
 
         if (results.size() > 0) {
-            return results.back().depth;
+            return results.back()->depth;
         }
         return 0;
     }
@@ -109,7 +109,7 @@ struct search_manager
         return results.size();
     }
 
-    search_result get_iteration_result(int it)
+    std::shared_ptr<search_result> get_iteration_result(int it)
     {
         std::lock_guard<std::mutex> guard(results_lock);
 
@@ -133,12 +133,12 @@ struct search_manager
         uint64_t ptime = 0;
         uint64_t pnodes = 0;
         if (results.size() > 1) {
-            ptime = results[results.size()-2].time_ms;
-            pnodes = results[results.size()-2].nodes;
+            ptime = results[results.size()-2]->time_ms;
+            pnodes = results[results.size()-2]->nodes;
         }
 
-        uint64_t dtime = results.back().time_ms - ptime;
-        uint64_t dnodes = results.back().nodes - pnodes;
+        uint64_t dtime = results.back()->time_ms - ptime;
+        uint64_t dnodes = results.back()->nodes - pnodes;
 
         if (dtime > 0) {
             return (dnodes*1000)/dtime;
@@ -157,7 +157,7 @@ private:
     uint64_t start_time;
 
     std::atomic<bool> ready_flag;
-    std::vector<search_result> results;
+    std::vector<std::shared_ptr<search_result>> results;
     std::mutex results_lock;
 
     search_limit_type_t limit;

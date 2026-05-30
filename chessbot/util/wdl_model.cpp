@@ -127,40 +127,37 @@ std::pair<wdl_model_dataset, wdl_model_dataset> load_wdl_model_dataset(std::stri
 
     srand(123);
 
-    std::vector<selfplay_result> results;
-
     for (const auto& entry : std::filesystem::directory_iterator(dataset_folder)) {
-        if (entry.path().extension().string() == ".txt") {
-            std::vector<selfplay_result> file_results;
-            load_selfplay_results(file_results, entry.path().string());
+        if (entry.path().extension().string() == ".pgn") {
 
-            for (auto &r : file_results) {
-                results.push_back(r);
-            }
+            iterate_pgn_positions(pgn_parser::read_text_file(entry.path().string()),
+                                  [&] (const board_state &state,
+                                       chess_move bm,
+                                       game_win_type_t game_result,
+                                       std::string *comment) {
+
+                                      int32_t material = get_material(state);
+                                      int32_t eval = std::atoi(comment->c_str());
+
+
+                                      float wdl = 0.0f;
+                                      if ((state.get_turn() == WHITE && game_result == WHITE_WIN) ||
+                                          (state.get_turn() == BLACK && game_result == BLACK_WIN)) {
+                                          wdl = 1.0f;
+                                      }
+
+                                      data_train.push_back({material, eval, wdl});
+                                  });
         }
     }
 
-    board_state state;
-
     for (int i = 0; i < valid_size; i++) {
-        int r = rand() % results.size();
+        int r = rand() % data_train.size();
 
-        state.load_fen(results[r].fen);
+        data_valid.push_back(data_train[r]);
 
-        float truth = (((results[r].wdl > 0.75 && state.get_turn() == WHITE) || (results[r].wdl < 0.25 && state.get_turn() == BLACK)) ? 1.0f : 0.0f);
-
-        data_valid.push_back({get_material(state), results[r].eval, truth});
-
-        std::swap(results[results.size()-1], results[r]);
-        results.pop_back();
-    }
-
-    for (const selfplay_result &spr : results) {
-        state.load_fen(spr.fen);
-
-        float truth = (((spr.wdl > 0.75 && state.get_turn() == WHITE) || (spr.wdl < 0.25 && state.get_turn() == BLACK)) ? 1.0f : 0.0f);
-
-        data_train.push_back({get_material(state), spr.eval, truth});
+        std::swap(data_train[data_train.size()-1], data_train[r]);
+        data_train.pop_back();
     }
 
     return {data_train, data_valid};

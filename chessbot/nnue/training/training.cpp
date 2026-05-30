@@ -5,12 +5,10 @@
 #include <condition_variable>
 #include <algorithm>
 #include <random>
-#include <sstream>
-#include <filesystem>
 #include <random>
 #include "../nnue.hpp"
+#include <iomanip>
 
-#include "../../search.hpp"
 
 
 struct trainer_params
@@ -466,7 +464,7 @@ private:
     int steps;
 };
 
-void nnue_trainer::test_nets(std::string training_net_file, std::string quantized_net_file, std::vector<selfplay_result> &test_set)
+void nnue_trainer::test_nets(std::string training_net_file, std::string quantized_net_file, const std::string &pgn_dataset)
 {
     std::cout << "Testing networks." << std::endl;
 
@@ -511,15 +509,18 @@ void nnue_trainer::test_nets(std::string training_net_file, std::string quantize
     float worst_psqt_quantization_error = 0.0f;
 
     std::cout << "Evaluating..." << std::endl;
-    for (size_t i = 0; i < test_set.size(); i++) {
-        state.load_fen(test_set[i].fen);
 
-        if (state.in_check(state.get_turn()) || state.get_square(test_set[i].bm.to).get_type() != EMPTY) {
-            continue;
+    iterate_pgn_positions(pgn_dataset, [&] (const board_state &state, chess_move bm, game_win_type_t game_result, std::string *comment)
+    {
+        int32_t eval_cp = std::atoi(comment->c_str());
+
+        if (state.in_check(state.get_turn()) || state.get_square(bm.to).get_type() != EMPTY) {
+            return;
         }
+
         positions++;
 
-        float real = test_set[i].eval / 100.0f;
+        float real = eval_cp / 100.0f;
         float qeval = (float)quantized_nnue.evaluate(state) / 100.0f;
         float eval = training_nnue.evaluate(state);
 
@@ -552,8 +553,7 @@ void nnue_trainer::test_nets(std::string training_net_file, std::string quantize
 
         worst_pos_quantization_error = std::max(worst_pos_quantization_error, std::abs(pos_eval - qpos_eval));
         worst_psqt_quantization_error = std::max(worst_psqt_quantization_error, std::abs(psqt_eval - qpsqt_eval));
-    }
-
+    });
 
 
     nnue_mse = nnue_mse / positions;
@@ -632,11 +632,11 @@ void training_loop(std::string net_file, std::string qnet_file, std::shared_ptr<
     trainer_params params;
 
     params.use_factorized = true;
-    params.learning_rate = 0.0001f;
-    params.weight_decay = 0.01f;//0.0f;
+    params.learning_rate = 0.0008f;
+    params.weight_decay = 0.00f;
     params.beta1 = 0.9f;
     params.beta2 = 0.999f;
-    params.batch_size = 32000*opt.get_pool_size();
+    params.batch_size = 4000*opt.get_pool_size();
     params.epoch_size = 100000000;
     params.min_lambda = 0.2f;
     params.max_lambda = 0.4f;
@@ -646,7 +646,7 @@ void training_loop(std::string net_file, std::string qnet_file, std::shared_ptr<
 
     params.enable_position_skipping = false;
 
-    params.learning_rate_decay = 0.98f;
+    params.learning_rate_decay = 0.99f;
 
     std::cout << std::endl;
     std::cout << "Dataset size: " << dataset->get_size<training_position>() / (1000*1000) << "M" << std::endl;
@@ -727,24 +727,29 @@ void nnue_trainer::train(std::string net_file, std::string qnet_file, std::vecto
 }
 
 
-float nnue_trainer::find_scaling_factor_for_net(std::string qnet_file, std::vector<selfplay_result> &positions)
+float nnue_trainer::find_scaling_factor_for_net(std::string qnet_file, const std::string &pgn_dataset)
 {
     std::shared_ptr<nnue_weights> weights = std::make_shared<nnue_weights>();
     weights->load(qnet_file);
     nnue_network net(weights);
 
     std::vector<training_position> data;
-    data.reserve(positions.size());
 
     std::cout << "Evaluating positions... ";
 
-    board_state state;
 
-    for (size_t i = 0; i < positions.size(); i++) {
-        state.load_fen(positions[i].fen);
-        data.emplace_back(positions[i]);
+    iterate_pgn_positions(pgn_dataset, [&] (const board_state &state, chess_move bm, game_win_type_t game_result, std::string *comment)
+    {
+        int32_t eval = std::atoi(comment->c_str());
+        float wdl = 0.0f;
+
+        if      (game_result == WHITE_WIN) wdl = 1.0f;
+        else if (game_result == BLACK_WIN) wdl = 0.0f;
+
+        data.emplace_back(state, bm, eval, wdl);
         data.back().eval = net.evaluate(state);
-    }
+    });
+
     std::cout << "done." << std::endl;
 
     float scaling_factor = training_data_utility::find_scaling_factor_for_data(data);

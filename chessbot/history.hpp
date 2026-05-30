@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstring>
 #include "state.hpp"
 
 constexpr int32_t correction_history_grain = 512;
@@ -37,7 +38,7 @@ struct history_heurestic_table
     }
 
     void reset() {
-        memset((void*)this, 0, sizeof(*this));
+        std::memset((void*)this, 0, sizeof(*this));
     }
 
     void update_continuation_history(chess_move m, int ply, int effect)

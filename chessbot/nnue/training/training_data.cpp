@@ -1,4 +1,5 @@
 #include "training_data.hpp"
+#include "../../util/pgn_parser.hpp"
 #include <math.h>
 #include <algorithm>
 #include <random>
@@ -52,32 +53,34 @@ float training_data_utility::find_scaling_factor_for_data(const std::vector<trai
 
 
 
-void filter_and_convert_data(std::vector<selfplay_result> &data_in, std::vector<training_position> &data_out)
+size_t filter_and_convert_data(const std::string &pgn_text, std::vector<training_position> &data_out)
 {
     //This function filters selfplay results
     std::vector<training_position> data;
 
-    data.reserve(data_in.size());
+    size_t unfiltered_position_count = 0;
 
+    iterate_pgn_positions(pgn_text, [&] (const board_state &state, chess_move bm, game_win_type_t game_result, std::string *comment)
+    {
+        unfiltered_position_count += 1;
+        int32_t eval = std::atoi(comment->c_str());
 
-    board_state state;
-    for (size_t i = 0; i < data_in.size(); i++) {
-        state.load_fen(data_in[i].fen);
-
-        bool is_tactical = (state.get_square(data_in[i].bm.to).get_type() != EMPTY) || state.in_check(WHITE) || state.in_check(BLACK);
+        bool is_tactical = (state.get_square(bm.to).get_type() != EMPTY) || state.in_check(WHITE) || state.in_check(BLACK);
         if (!is_tactical) {
-            data.emplace_back(state, data_in[i]);
-        }
+            float wdl = 0.5f;
+            if (game_result == WHITE_WIN) {
+                wdl = 1.0f;
+            } else if (game_result == BLACK_WIN) {
+                wdl = 0.0f;
+            }
 
-        if ((i % 100000) == 0) {
-            std::cout << "\rFiltering and converting data: " << (i*100)/data_in.size() << "%   ";
+            data.emplace_back(state, bm, eval, wdl);
         }
-    }
-    std::cout << std::endl;
+    });
+
 
     std::vector<training_position> batch = get_random_batch(data, 100000);
     float scaling_factor = training_data_utility::find_scaling_factor_for_data(batch);
-
 
     data_out.reserve(data_out.size() + data.size());
 
@@ -85,6 +88,8 @@ void filter_and_convert_data(std::vector<selfplay_result> &data_in, std::vector<
         data[i].eval = (data[i].eval * 400) / scaling_factor;
         data_out.push_back(data[i]);
     }
+
+    return unfiltered_position_count;
 }
 
 
@@ -130,18 +135,16 @@ void training_data_utility::convert_training_data(std::vector<std::string> selfp
             std::string filename = entry.path().string();
             std::string extension = entry.path().extension().string();
 
-            if (extension == ".txt") {
-                std::vector<selfplay_result> sprdata;
-                load_selfplay_results(sprdata, filename);
+            if (extension == ".pgn") {
+                std::string pgn_text = pgn_parser::read_text_file(filename);
 
-                filter_and_convert_data(sprdata, positions);
+                raw_data_size += filter_and_convert_data(pgn_text, positions);
 
                 while (positions.size() >= positions_per_file) {
                     save_binary_data(positions, output_folder, file_count++, positions_per_file);
                     filtered_data_size += positions_per_file;
                     output_files++;
                 }
-                raw_data_size += sprdata.size();
                 input_files++;
             }
         }

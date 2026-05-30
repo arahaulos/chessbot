@@ -6,22 +6,26 @@ time_manager::time_manager() {
     move_overhead = get_default_overhead();
 }
 
-time_manager::time_manager(int tleft, int tinc) {
+time_manager::time_manager(int tleft, int tinc, int ply) {
     test_flag = false;
     move_overhead = get_default_overhead();
-    init(tleft, tinc);
+    init(tleft, tinc, ply);
 }
 
 int time_manager::get_default_overhead() {
     return 100;
 }
 
-void time_manager::init(int tleft, int tinc) {
+void time_manager::init(int tleft, int tinc, int ply) {
     time_left = tleft - move_overhead;
     time_inc = tinc;
 
-    int base_time = (time_left / 18) + time_inc/2;
-    int max_base_time = (time_left / 8) + time_inc/2;
+    float move_num = std::min(ply/2 + 1, 20);
+
+    opening_factor = 1.25f - (move_num / 80.0f);
+
+    float base_time = ((time_left / 18) + time_inc/2) * opening_factor;
+    float max_base_time = ((time_left / 8) + time_inc/2) * opening_factor;
 
     max_time = std::min(time_left, max_base_time);
     target_time = std::min(time_left, base_time);
@@ -30,6 +34,7 @@ void time_manager::init(int tleft, int tinc) {
 
     iterations.clear();
 }
+
 
 bool time_manager::end_of_iteration(int depth, chess_move bm, int32_t eval, int32_t time)
 {
@@ -47,20 +52,23 @@ bool time_manager::end_of_iteration(int depth, chess_move bm, int32_t eval, int3
                 bm_stable = false;
             }
 
-            if (eval < 300 && (std::abs(iterations[i].eval - iterations[i+1].eval) > 50 || std::abs(iterations[i-1].eval - iterations[i+1].eval) > 100)) {
+            if (eval < 300 && (std::abs(iterations[i].eval - iterations[i+1].eval) > 50 || std::abs(iterations[i-1].eval - iterations[i+1].eval) > 90)) {
                 eval_stable = false;
             }
         }
 
-        int time_modifier = 18;
+        int expect_moves = 18;
         if (bm_stable && eval_stable) {
-            time_modifier = 25;
+            expect_moves = 25;
         } else if ((!bm_stable && eval_stable) || (!eval_stable && bm_stable)) {
-            time_modifier = 14;
+            expect_moves = 14;
         } else if (!bm_stable && !eval_stable) {
-            time_modifier = 8;
+            expect_moves = 8;
         }
-        target_time = std::min((time_left / time_modifier) + time_inc/2, max_time);
+
+        float new_target = ((time_left / expect_moves) + time_inc/2) * opening_factor;
+
+        target_time = std::min(new_target, max_time);
     }
     return should_stop_new_iteration(time);
 }
@@ -70,11 +78,11 @@ float time_manager::avg_branching_factor()
     float branching_factor = 0.0f;
     int branching_factor_samples = 0;
     for (int i = 1; i < iterations.size()-1; i++) {
-        int ittime0 = iterations[i+1].timepoint - iterations[i].timepoint;
-        int ittime1 = iterations[i].timepoint - iterations[i-1].timepoint;
+        float ittime0 = iterations[i+1].timepoint - iterations[i].timepoint;
+        float ittime1 = iterations[i].timepoint - iterations[i-1].timepoint;
 
         if (ittime0 > 5 && ittime1 > 5) {
-            branching_factor += (float)ittime0 / ittime1;
+            branching_factor += ittime0 / ittime1;
             branching_factor_samples++;
         }
     }
@@ -90,9 +98,9 @@ bool time_manager::should_stop_new_iteration(int tused)
     time_used = tused;
 
     if (iterations.size() > 10) {
-        int prev_iteration_time = iterations[iterations.size()-1].timepoint - iterations[iterations.size()-2].timepoint;
+        float prev_iteration_time = iterations[iterations.size()-1].timepoint - iterations[iterations.size()-2].timepoint;
 
-        int estimated_complete_time = time_used + std::clamp(avg_branching_factor(), 1.0f, 2.0f)*prev_iteration_time / 2;
+        float estimated_complete_time = time_used + std::clamp(avg_branching_factor(), 1.0f, 2.0f)*prev_iteration_time / 2;
 
         return (estimated_complete_time > target_time);
     } else {

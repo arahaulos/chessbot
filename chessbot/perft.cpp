@@ -2,6 +2,7 @@
 #include <iostream>
 #include <chrono>
 #include "perft.hpp"
+#include "zobrist.hpp"
 
 
 int perft::run_perft(board_state &state, int depth, bool debug)
@@ -38,7 +39,7 @@ int perft::run_perft(board_state &state, int depth, bool debug)
 
         std::cout << "Nodes: " << nodes << std::endl;
         if (ms.count() > 0) {
-            std::cout << "Performance: " << (float)(nodes / ms.count()) / 1000 << " million moves per second" << std::endl;
+            std::cout << "Performance: " << (static_cast<double>(nodes) / ms.count()) / 1000 << " million moves per second" << std::endl;
         }
         std::cout << "TT hits: " << sc->stats.cache_hits << std::endl;
 
@@ -61,7 +62,7 @@ int perft::run_perft(board_state &state, int depth, bool debug)
 
         std::cout << "Nodes: " << nodes << std::endl;
         if (ms.count() > 0) {
-            std::cout << "Performance: " << (float)(nodes / ms.count()) / 1000 << " million moves per second" << std::endl;
+            std::cout << "Performance: " << (static_cast<double>(nodes) / ms.count()) / 1000 << " million moves per second" << std::endl;
         }
 
         return nodes;

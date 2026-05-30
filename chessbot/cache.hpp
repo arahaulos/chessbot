@@ -1,9 +1,14 @@
 #pragma once
 
 #include <stdint.h>
-#include <iostream>
+#include <algorithm>
 
+#ifdef __linux__
 #define USE_HUGEPAGES 1
+#else
+#define USE_HUGEPAGES 0
+#endif
+
 
 #if USE_HUGEPAGES==1
 
@@ -110,7 +115,7 @@ private:
 
         #else
 
-        delete [] memory;
+        delete [] static_cast<uint8_t*>(memory);
 
         #endif // USE_HUGEPAGES
     }

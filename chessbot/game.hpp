@@ -1,7 +1,6 @@
 #pragma once
 
 #include "state.hpp"
-#include <stack>
 #include <string>
 
 enum game_win_type_t {NO_WIN = 0, WHITE_WIN = 1, BLACK_WIN = 2, DRAW = 3};

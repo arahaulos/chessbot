@@ -14,9 +14,7 @@ struct chess_move;
 struct training_position
 {
     training_position() { bm = 0;};
-
-    training_position(const selfplay_result &spr);
-    training_position(const board_state &state, const selfplay_result &spr);
+    training_position(const board_state &state, chess_move bm, int32_t eval, float wdl);
 
     uint8_t iterate_pieces(uint64_t &occ, int &index, int &sq_index) const
     {

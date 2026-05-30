@@ -3,11 +3,13 @@
 #include <sstream>
 #include <iomanip>
 #include "application.hpp"
+
+#include "chessbot/zobrist.hpp"
 #include "chessbot/perft.hpp"
 #include "chessbot/search_manager.hpp"
 
-#include "chessbot/util/datagen.hpp"
-
+#include "chessbot/util/wdl_model.hpp"
+#include "chessbot/util/pgn_parser.hpp"
 
 application::application()
 {
@@ -19,28 +21,6 @@ application::application()
 
     game->get_state().set_initial_state();
 }
-
-
-void application::datagen(std::string folder, std::string nnue_file, std::string opening_suite, int threads, int depth, int nodes, bool multi_pv_opening, int opening_moves, int games_per_file, int max_files)
-{
-    int filenum = 0;
-    while (filenum < max_files) {
-        filenum++;
-
-        std::stringstream ss;
-        ss << folder << "/nodes" << nodes / 1000 << "k_" << games_per_file << "_" << filenum << ".txt";
-
-        std::string filename = ss.str();
-
-        std::ifstream file(filename);
-        if (file.is_open()) {
-            file.close();
-            continue;
-        }
-        training_datagen::datagen(filename, nnue_file, threads, games_per_file, depth, nodes, multi_pv_opening, opening_moves, opening_suite);
-    }
-}
-
 
 
 int application::perft_test(std::string position_fen, std::vector<int> expected_results)
@@ -264,6 +244,134 @@ void application::run_benchmark()
 }
 
 
+std::vector<position_analysis_result> application::analyze_game(std::string startpos, std::vector<chess_move> &moves, int min_nodes, int min_depth)
+{
+    std::shared_ptr<search_manager> man = std::make_shared<search_manager>();
+
+    game->reset();
+    if (startpos == "") {
+    } else {
+        game->get_state().load_fen(startpos);
+    }
+
+    std::vector<position_analysis_result> results;
+
+    bool decisive_end = false;
+
+    for (chess_move mov : moves) {
+        man->prepare_depth_nodes_search(min_depth, min_nodes);
+        alphabeta->search(game->get_state(), man);
+
+        position_analysis_result r;
+
+        r.played = mov;
+        r.bm = man->get_move();
+        r.cp = wdl_model::normalize_score(game->get_state(), man->get_evaluation());
+
+        wdl_model::get_wdl(game->get_state(), man->get_evaluation(), r.win_p, r.draw_p, r.loss_p);
+
+        results.push_back(r);
+
+        if (game->make_move(mov) != NO_WIN) {
+            decisive_end = true;
+            break;
+        }
+    }
+
+    if (!decisive_end) {
+        man->prepare_depth_nodes_search(min_depth, min_nodes);
+        alphabeta->search(game->get_state(), man);
+
+        position_analysis_result r;
+
+        r.played = chess_move::null_move();
+        r.bm = man->get_move();
+        r.cp = wdl_model::normalize_score(game->get_state(), man->get_evaluation());
+
+        wdl_model::get_wdl(game->get_state(), man->get_evaluation(), r.win_p, r.draw_p, r.loss_p);
+
+        results.push_back(r);
+    }
+
+
+    return results;
+}
+
+
+
+float application::game_accuracy(std::vector<position_analysis_result> &analysis, player_type_t player)
+{
+    auto win_ratio = [&](size_t i) {
+        //return 0.5f + 0.5f*(analysis[i].win_p - analysis[i].loss_p);
+
+        return 0.5f + 0.5f * (2 / (1 + std::exp(-0.00368208 * analysis[i].cp)) - 1);
+    };
+
+    int window_size = std::clamp((int)analysis.size() / 10, 2, 8);
+
+    std::vector<float> move_accuracies(analysis.size()-1);
+    std::vector<float> window_volatilities(analysis.size()-1);
+
+    for (size_t i = 0; i < analysis.size()-1; i++) {
+
+        float win_ratio_before = win_ratio(i);
+        float win_ratio_after = 1.0f - win_ratio(i+1);
+
+        move_accuracies[i] = 103.1668f * std::exp(-0.04354f * (win_ratio_before*100.0f - win_ratio_after*100.0f)) - 3.1669f;
+
+        move_accuracies[i] = std::clamp(move_accuracies[i], 0.0f, 100.0f);
+    }
+
+    for (size_t i = 0; i < analysis.size()-1; i++) {
+        float std_dev = 0;
+        float std_mean = 0;
+
+        int N = 0;
+
+        for (int j = -window_size/2; j <= window_size/2; j++) {
+            if (i+j >= 0 && i+j < move_accuracies.size()) {
+                std_mean += move_accuracies[i+j];
+                N++;
+            }
+        }
+        std_mean /= N;
+        for (int j = -window_size/2; j <= window_size/2; j++) {
+            if (i+j >= 0 && i+j < move_accuracies.size()) {
+                std_dev += (move_accuracies[i+j] - std_mean)*(move_accuracies[i+j] - std_mean);
+            }
+        }
+        std_dev = sqrt(std_dev / N);
+
+        window_volatilities[i] = std::clamp(std_dev, 0.5f, 12.0f);
+    }
+
+    float weighted_sum = 0;
+    float reciprocal_sum = 0;
+
+    float weights_sum = 0;
+
+    float count = 0;
+
+    for (int i = 0; i < analysis.size()-1; i++) {
+        if (analysis[i].bm.get_moving_piece().get_player() != player) {
+            continue;
+        }
+
+        weighted_sum += window_volatilities[i]*move_accuracies[i];
+        weights_sum += window_volatilities[i];
+
+        reciprocal_sum += 1.0f/move_accuracies[i];
+
+        count += 1.0f;
+    }
+
+    float weighted_mean = weighted_sum / weights_sum;
+    float harmonic_mean = 1.0f / (reciprocal_sum / count);
+
+    return (weighted_mean + harmonic_mean) / 2;
+}
+
+
 
 void application::run()
 {
@@ -278,6 +386,31 @@ void application::run()
                 run_benchmark();
             } else if (cmd == "test") {
                 run_tests();
+            } else if (cmd == "analyze") {
+                std::string pgn_text = pgn_lines;
+
+                pgn_lines = "";
+
+                std::vector<pgn_comment> comments;
+
+                std::vector<pgn_tag> tags = pgn_parser::parse_tags(pgn_text);
+
+                std::string startpos_fen = pgn_parser::get_tag_value(tags, "FEN");
+
+                std::vector<chess_move> moves = pgn_parser::parse_moves(pgn_text, startpos_fen, &comments);
+
+                std::vector<position_analysis_result> result = analyze_game(startpos_fen, moves, 100000, 12);
+
+                float white_accuracy = game_accuracy(result, WHITE);
+                float black_accuracy = game_accuracy(result, BLACK);
+
+                std::cout << "Moves: " << moves.size() / 2 << std::endl;
+
+                std::cout << "White accuracy: " << white_accuracy << "%" << std::endl;
+                std::cout << "Black accuracy: " << black_accuracy << "%" << std::endl;
+
+            } else if (pgn_lines.size() < 64*1024) {
+                pgn_lines += "\n" + cmd;
             }
         }
 

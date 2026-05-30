@@ -7,6 +7,18 @@
 #include "chessbot/uci.hpp"
 
 
+struct position_analysis_result
+{
+    chess_move bm;
+    chess_move played;
+
+    int cp;
+
+    float win_p;
+    float draw_p;
+    float loss_p;
+};
+
 
 
 class application
@@ -18,7 +30,15 @@ public:
     void run_tests();
     void run_benchmark();
     void eval_trace(std::string fen);
-    void datagen(std::string folder, std::string nnue_file, std::string opening_suite, int threads, int depth, int nodes, bool multi_pv_opening, int opening_moves, int games_per_file, int max_files);
+
+    std::vector<position_analysis_result> analyze_game(std::string startpos, std::vector<chess_move> &moves, int min_nodes, int min_depth);
+    float game_accuracy(std::vector<position_analysis_result> &analysis, player_type_t player);
+
+
+    std::shared_ptr<searcher> get_searcher() {
+        return alphabeta;
+    }
+
 private:
     int perft_test(std::string position_fen, std::vector<int> expected_results);
     int test_incremental_updates();
@@ -28,4 +48,6 @@ private:
     std::shared_ptr<game_state> game;
     std::shared_ptr<searcher> alphabeta;
     std::shared_ptr<uci_interface> uci;
+
+    std::string pgn_lines;
 };

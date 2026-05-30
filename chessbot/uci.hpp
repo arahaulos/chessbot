@@ -19,6 +19,7 @@ struct go_info
         winc = 0;
         binc = 0;
         movetime = 0;
+        ply = 0;
     }
 
     bool active;
@@ -33,6 +34,8 @@ struct go_info
     int nodes;
 
     int movetime;
+
+    int ply;
 };
 
 
@@ -85,6 +88,8 @@ private:
 
     bool show_wdl;
     bool ponder;
+
+    int last_position_ply;
 };
 
 std::vector<std::string> split_string(std::string str, char d);

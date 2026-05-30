@@ -3,16 +3,44 @@
 #include "../game.hpp"
 #include <memory>
 #include <thread>
-#include <fstream>
 #include <cmath>
 #include <atomic>
 #include <iomanip>
-
+#include "pgn_parser.hpp"
 #include "misc.hpp"
-#include "testing.hpp"
 
 #include "../search_manager.hpp"
+#include "wdl_model.hpp"
 
+
+
+bool adjucate_win(board_state &state, int32_t search_score, int plies_played, datagen_config &config)
+{
+    if (plies_played < config.adjucate_win_min_plies) {
+        return false;
+    }
+
+    int32_t normalized_score = wdl_model::normalize_score(state, search_score);
+
+    return (std::abs(normalized_score) > config.adjucate_win_cp_treshold);
+}
+
+bool adjucate_draw(board_state &state, int32_t &draw_adjucation_counter, int32_t search_score, int plies_played, datagen_config &config)
+{
+    if (plies_played < config.adjucate_draw_min_plies) {
+        return false;
+    }
+
+    int32_t normalized_score = wdl_model::normalize_score(state, search_score);
+
+    if (std::abs(normalized_score) < config.adjucate_draw_cp_treshold) {
+        draw_adjucation_counter += 1;
+    } else {
+        draw_adjucation_counter = 0;
+    }
+
+    return (draw_adjucation_counter >= config.adjucate_draw_plies_below_treshold);
+}
 
 struct datagen_worker
 {
@@ -22,9 +50,15 @@ struct datagen_worker
         worker_id = worker_counter;
         worker_counter += 1;
         avg_depth = 0.0f;
-
         avg_start_pos_abs_eval = 0.0f;
         avg_opening_branching_factor = 0.0f;
+
+        positions_generated = 0;
+
+        num_of_first_moves = 0;
+        first_move_abs_eval_sum = 0;
+        total_opening_moves = 0;
+        played_opening_moves = 0;
 
         search = std::make_unique<searcher>();
         sman = std::make_shared<search_manager>();
@@ -36,211 +70,234 @@ struct datagen_worker
         t.join();
     }
 
-    void start(std::atomic<int> &games, int depth, int nodes, std::shared_ptr<nnue_weights> weights, std::shared_ptr<std::vector<std::string>> openings, bool multi_pv_opening, int opening_moves)
+    void start(std::atomic<int> &games, std::shared_ptr<nnue_weights> weights, std::shared_ptr<std::vector<std::string>> openings, std::shared_ptr<cache<uint64_t, 64>> startpos_cache, datagen_config &c)
     {
-        t = std::thread(&datagen_worker::play, this, std::ref(games), depth, nodes, weights, openings, multi_pv_opening, opening_moves);
+        config = c;
+
+        t = std::thread(&datagen_worker::generate_loop, this, std::ref(games), weights, openings, startpos_cache);
     }
 
-    std::vector<selfplay_result> results;
+    std::vector<std::string> results;
     double avg_depth;
     double avg_start_pos_abs_eval;
     double avg_opening_branching_factor;
+    uint64_t positions_generated;
 private:
-    void play(std::atomic<int> &games, int d, int n, std::shared_ptr<nnue_weights> weights, std::shared_ptr<std::vector<std::string>> openings, bool multi_pv_opening, int opening_moves);
+    void generate_loop(std::atomic<int> &games, std::shared_ptr<nnue_weights> weights, std::shared_ptr<std::vector<std::string>> openings, std::shared_ptr<cache<uint64_t, 64>> startpos_cache);
+
+    std::string generate_game(const std::string &opening_fen, std::shared_ptr<cache<uint64_t, 64>> &startpos_cache);
 
     std::unique_ptr<searcher> search;
     std::shared_ptr<search_manager> sman;
 
+    game_state game;
+
     std::thread t;
     int worker_id;
+
+    datagen_config config;
+
+    int num_of_first_moves;
+    double first_move_abs_eval_sum;
+
+    long total_opening_moves;
+    long played_opening_moves;
 };
 
 
-void datagen_worker::play(std::atomic<int> &games, int d, int n, std::shared_ptr<nnue_weights> weights, std::shared_ptr<std::vector<std::string>> openings, bool multi_pv_opening, int opening_moves)
+void datagen_worker::generate_loop(std::atomic<int> &games, std::shared_ptr<nnue_weights> weights, std::shared_ptr<std::vector<std::string>> openings, std::shared_ptr<cache<uint64_t, 64>> startpos_cache)
 {
     std::srand((size_t)time(NULL) + worker_id);
 
     search->set_shared_weights(weights);
-
-    game_state game;
-
-    int num_of_first_moves = 0;
-    double first_move_abs_eval_sum = 0;
-
-    long total_opening_moves = 0;
-    long played_opening_moves = 0;
+    search->forward_pruning = config.forward_pruning;
 
     while (games > 0) {
-        game.reset();
-        game.get_state().load_fen((*openings)[rand()%openings->size()]);
-        search->new_game();
-
-        std::vector<position_evaluation> game_positions;
-
-        game_win_type_t win_status = NO_WIN;
-        game_win_type_t mate_found_win = NO_WIN;
-
-        int random_moves = opening_moves;
-
-        double total_depth = 0;
-        int searched_moves = 0;
-        int moves = 0;
-
-        while (true) {
-            if (random_moves > 0) {
-                sman->prepare_depth_nodes_search(std::max(d-3, 0), n);
-
-                std::vector<chess_move> acceptable_moves;
-                if (!multi_pv_opening) {
-                    acceptable_moves = game.get_state().get_all_legal_moves(game.get_state().get_turn());
-                } else {
-                    constexpr int multipv = 5;
-                    constexpr int max_cp_loss = 120;
-
-                    if (search->get_multi_pv() != multipv) {
-                        search->set_multi_pv(multipv);
-                    }
-                    search->search(game.get_state(), sman);
-
-                    int32_t best_score = sman->get_evaluation();
-
-                    for (int i = 0; i < multipv; i++) {
-                        pv_table pv;
-                        sman->get_pv(pv, i);
-
-                        if (pv.num_of_moves > 0 && std::abs(pv.score - best_score) < max_cp_loss) {
-                            acceptable_moves.push_back(pv.moves[0]);
-                        }
-                    }
-                }
-
-                if (acceptable_moves.size() == 0) {
-                    std::cout << "Error: no legal moves" << std::endl;
-                    win_status = DRAW;
-                } else {
-                    win_status = game.make_move(acceptable_moves[std::rand() % acceptable_moves.size()]);
-                    random_moves -= 1;
-
-                    played_opening_moves += 1;
-                    total_opening_moves += acceptable_moves.size();
-                }
-
-            } else {
-                sman->prepare_depth_nodes_search(d, n);
-
-                if (search->get_multi_pv() != 1) {
-                    search->set_multi_pv(1);
-                }
-
-
-                chess_move mov = chess_move::null_move();
-                int32_t score;
-                int depth;
-
-                search->search(game.get_state(), sman);
-
-                mov = sman->get_move();
-                score = sman->get_evaluation();
-                depth = sman->get_depth();
-
-                if (is_mate_score(score) && mate_found_win == NO_WIN) {
-                    if ((game.get_state().get_turn() == BLACK && score < 0) ||
-                        (game.get_state().get_turn() == WHITE && score > 0)) {
-                        mate_found_win = WHITE_WIN;
-                    } else {
-                        mate_found_win = BLACK_WIN;
-                    }
-                }
-
-                if (depth > 1 && !is_mate_score(score)) {
-                    game_positions.push_back(position_evaluation(game.get_state(), score, mov));
-                }
-
-                if (mov == chess_move::null_move()) {
-                    std::cout << "Engine produced nullmove. depth = " << depth << "  score = " << score << "  move = " << mov.to_uci() << std::endl;
-                    std::cout << "Position: " << game.get_state().generate_fen() << std::endl;
-                }
-
-                if (searched_moves == 0 && !is_mate_score(score)) {
-                    first_move_abs_eval_sum += (double)std::abs(score);
-                    num_of_first_moves += 1;
-                }
-
-                searched_moves += 1;
-                total_depth += depth;
-
-                win_status = game.make_move(mov);
-
-                if (mate_found_win != NO_WIN && win_status == NO_WIN) {
-                    win_status = mate_found_win;
-                }
-            }
-            moves++;
-
-            if (moves > 512) {
-                win_status = DRAW;
-            }
-            if (win_status != NO_WIN) {
-                //std::cout << "Worker " << worker_id << "  Game number: " << games << "  Result: " << win_type_to_str(win_status) << std::endl;
-                break;
-            }
-            if (games <= 0) {
-                return;
-            }
-        }
-
-        if (searched_moves > 0) {
-            avg_depth = total_depth / searched_moves;
-            avg_start_pos_abs_eval = first_move_abs_eval_sum / num_of_first_moves;
-            avg_opening_branching_factor = (double)total_opening_moves / played_opening_moves;
-        }
-
-        games--;
-
-        for (auto it = game_positions.begin(); it != game_positions.end(); it++) {
-            results.push_back(selfplay_result(*it, win_status));
+        std::string game_pgn = generate_game((*openings)[rand()%openings->size()], startpos_cache);
+        if (game_pgn.length() > 0) {
+            results.push_back(game_pgn);
+            games--;
         }
     }
 }
 
 
-void training_datagen::datagen(std::string output_file, std::string nnue_file, int threads, int games, int depth, int nodes, bool multi_pv_opening, int opening_moves, std::string opening_suite)
+std::string datagen_worker::generate_game(const std::string &s_fen, std::shared_ptr<cache<uint64_t, 64>> &startpos_cache)
 {
-    std::cout << std::endl << "Selfplaying\nThreads: " << threads
-                           << "\nMin depth: " << depth
-                           << "\nMin nodes: " << nodes
-                           << "\nOutput file: " << output_file
-                           << "\nNNUE: " << (nnue_file != "" ? nnue_file : "embedded") << std::endl;
+    game.reset();
+    game.get_state().load_fen(s_fen);
+    search->new_game();
 
-    std::shared_ptr<nnue_weights> weights = nnue_weights::get_shared_weights();
-    std::shared_ptr<std::vector<std::string>> openings = std::make_shared<std::vector<std::string>>();
+    game_win_type_t game_result = NO_WIN;
+    game_win_type_t adjucated_result = NO_WIN;
 
-    if (opening_suite != "") {
-        *openings = load_opening_suite(opening_suite);
+    int random_moves = config.opening_moves;
+    int draw_adjucation_counter = 0;
+
+    double total_depth = 0;
+
+    std::string opening_fen = "";
+    std::vector<chess_move> moves_played;
+    std::vector<pgn_comment> comments;
+
+    while (true) {
+        if (random_moves > 0) {
+            sman->prepare_depth_nodes_search(std::max(config.depth-3, 0), config.nodes);
+
+            std::vector<chess_move> acceptable_moves;
+            if (!config.multi_pv_opening) {
+                acceptable_moves = game.get_state().get_all_legal_moves(game.get_state().get_turn());
+            } else {
+                constexpr int multipv = 5;
+                constexpr int max_cp_loss = 120;
+
+                if (search->get_multi_pv() != multipv) {
+                    search->set_multi_pv(multipv);
+                }
+                search->search(game.get_state(), sman);
+
+                int32_t best_score = sman->get_evaluation();
+
+                for (int i = 0; i < multipv; i++) {
+                    pv_table pv;
+                    sman->get_pv(pv, i);
+
+                    if (pv.num_of_moves > 0 && std::abs(pv.score - best_score) < max_cp_loss) {
+                        acceptable_moves.push_back(pv.moves[0]);
+                    }
+                }
+            }
+
+            if (acceptable_moves.size() == 0) {
+                std::cout << "Error: no legal moves" << std::endl;
+                game_result = DRAW;
+            } else {
+                game_result = game.make_move(acceptable_moves[std::rand() % acceptable_moves.size()]);
+                random_moves -= 1;
+
+                played_opening_moves += 1;
+                total_opening_moves += acceptable_moves.size();
+            }
+        } else {
+            if (opening_fen == "") {
+                if (config.filter_dublicate_openings) {
+                    uint64_t zhash = game.get_state().zhash;
+
+                    if ((*startpos_cache)[zhash] == zhash) {
+                        break;
+                    }
+                    (*startpos_cache)[zhash] = zhash;
+                }
+
+                opening_fen = game.get_state().generate_fen();
+            }
+
+            sman->prepare_depth_nodes_search(config.depth, config.nodes);
+
+            if (search->get_multi_pv() != 1) {
+                search->set_multi_pv(1);
+            }
+
+            chess_move mov = chess_move::null_move();
+
+            search->search(game.get_state(), sman);
+
+            mov = sman->get_move();
+            int32_t score = sman->get_evaluation();
+            int depth = sman->get_depth();
+
+            if (is_mate_score(score) || (config.adjucate_wins && adjucate_win(game.get_state(), score, moves_played.size(), config))) {
+                if ((game.get_state().get_turn() == BLACK && score < 0) ||
+                    (game.get_state().get_turn() == WHITE && score > 0)) {
+                    adjucated_result = WHITE_WIN;
+                } else {
+                    adjucated_result = BLACK_WIN;
+                }
+            } else if (config.adjucate_draws && adjucate_draw(game.get_state(), draw_adjucation_counter, score, moves_played.size(), config)) {
+                adjucated_result = DRAW;
+            } else {
+                if (moves_played.size() == 0) {
+                    first_move_abs_eval_sum += (double)std::abs(score);
+                    num_of_first_moves += 1;
+                }
+                comments.push_back({(int)moves_played.size(), std::to_string(score)});
+                moves_played.push_back(mov);
+            }
+
+            if (mov == chess_move::null_move()) {
+                std::cout << "Engine produced nullmove. depth = " << depth << "  score = " << score << "  move = " << mov.to_uci() << std::endl;
+                std::cout << "Position: " << game.get_state().generate_fen() << std::endl;
+            }
+
+            total_depth += depth;
+
+            game_result = game.make_move(mov);
+
+            if (adjucated_result != NO_WIN && game_result == NO_WIN) {
+                game_result = adjucated_result;
+            }
+        }
+        if (moves_played.size() > 512) {
+            game_result = DRAW;
+        }
+        if (game_result != NO_WIN) {
+            break;
+        }
+    }
+
+    if (moves_played.size() > 0) {
+        avg_depth = total_depth / moves_played.size();
+        avg_start_pos_abs_eval = first_move_abs_eval_sum / num_of_first_moves;
+        avg_opening_branching_factor = (double)total_opening_moves / played_opening_moves;
+
+        positions_generated += moves_played.size();
+
+        std::vector<pgn_tag> tags = {{"FEN", opening_fen}};
+
+        if (game_result == DRAW) {
+            tags.push_back({"Result", "1/2-1/2"});
+        } else {
+            tags.push_back({"Result", (game_result == WHITE_WIN ? "1-0" : "0-1")});
+        }
+
+        return pgn_parser::generate_pgn(tags, moves_played, opening_fen, &comments);
+    }
+
+    return "";
+}
+
+
+void training_datagen::datagen(std::string output_file, datagen_config &config)
+{
+    std::cout << std::endl << "Selfplaying\nThreads: " << config.threads
+                           << "\nMin depth: " << config.depth
+                           << "\nMin nodes: " << config.nodes
+                           << "\nOutput file: " << output_file << std::endl;
+
+
+    auto startpos_cache = std::make_shared<cache<uint64_t, 64>>();
+
+    auto weights = nnue_weights::get_shared_weights(); //Less L3 cache pressure when workers use shared weights
+
+    auto openings = std::make_shared<std::vector<std::string>>();
+
+    //Load opening suite
+    if (config.opening_suite != "") {
+        *openings = load_opening_suite(config.opening_suite);
     } else {
         openings->push_back("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
     }
 
-    std::cout << "Opening suite: " << opening_suite << std::endl;
+    std::cout << "Opening suite: " << config.opening_suite << std::endl;
     std::cout << "Opening positions: " << openings->size() << std::endl;
-    std::cout << "Multi PV opening: " << multi_pv_opening << std::endl;
-    std::cout << "Opening moves: " << opening_moves << std::endl;
+    std::cout << "Multi PV opening: " << config.multi_pv_opening << std::endl;
+    std::cout << "Opening moves: " << config.opening_moves << std::endl;
 
+    std::vector<datagen_worker> workers(config.threads);
+    std::atomic<int> agames = config.games;
 
-    if (nnue_file != "") {
-        std::cout << "Loading shared nnue weights: " << nnue_file << std::endl;
-        weights->load(nnue_file);
-    }
-
-
-    std::vector<datagen_worker> workers(threads);
-
-    std::vector<selfplay_result> results;
-
-    std::atomic<int> agames = games;
-
-    for (int i = 0; i < threads; i++) {
-        workers[i].start(agames, depth, nodes, weights, openings, multi_pv_opening, opening_moves);
+    for (int i = 0; i < config.threads; i++) {
+        workers[i].start(agames, weights, openings, startpos_cache, config);
     }
 
     int prev_positions = 0;
@@ -269,10 +326,10 @@ void training_datagen::datagen(std::string output_file, std::string nnue_file, i
                 int positions = 0;
                 first_move_abs_eval = 0;
                 opening_branching_factor = 0;
-                for (int i = 0; i < threads; i++) {
-                    positions += workers[i].results.size();
-                    first_move_abs_eval += workers[i].avg_start_pos_abs_eval / threads;
-                    opening_branching_factor += workers[i].avg_opening_branching_factor / threads;
+                for (int i = 0; i < config.threads; i++) {
+                    positions += workers[i].positions_generated;
+                    first_move_abs_eval += workers[i].avg_start_pos_abs_eval / config.threads;
+                    opening_branching_factor += workers[i].avg_opening_branching_factor / config.threads;
                 }
 
                 int delta_positions = positions - prev_positions;
@@ -308,7 +365,7 @@ void training_datagen::datagen(std::string output_file, std::string nnue_file, i
         }
 
         std::cout << "\r"
-                  << (games - agames) << "/" << games << "  "
+                  << (config.games - agames) << "/" << config.games << "  "
                   << std::setw(6) << (int)games_per_hour << " games/h  "
                   << std::setw(5) << (int)positions_per_second << " pos/s   D: "
                   << std::fixed << std::setprecision(2) << avg_depth << "   E: "
@@ -322,14 +379,17 @@ void training_datagen::datagen(std::string output_file, std::string nnue_file, i
 
     std::cout << std::endl;
 
-    for (int i = 0; i < threads; i++) {
+
+    std::stringstream ss;
+    for (int i = 0; i < config.threads; i++) {
         workers[i].wait();
-        results.insert(results.end(), workers[i].results.begin(), workers[i].results.end());
+
+        for (int j = 0; j < workers[i].results.size(); j++) {
+            ss << workers[i].results[j] << "\n";
+        }
     }
 
-    std::cout << "Total positions " << results.size() << std::endl;
-
-    save_selfplay_results(results, output_file);
+    pgn_parser::write_text_file(output_file, ss.str());
 }
 
 

@@ -30,11 +30,13 @@ uci_interface::uci_interface(std::shared_ptr<searcher> search_inst, std::shared_
     show_wdl = false;
     ponder = false;
 
-    time_man = std::make_shared<time_manager>(0,0);
+    time_man = std::make_shared<time_manager>(0,0,0);
     search_man = std::make_shared<search_manager>();
 
     search_man->set_uci(this);
     //uci_log.open("uci_log.txt");
+
+    last_position_ply = 0;
 }
 
 uci_interface::~uci_interface()
@@ -200,6 +202,8 @@ void uci_interface::execute_command(std::string cmd_line)
             }
         }
 
+        last_position_ply = moves.size();
+
         game_instance->get_state().load_fen(fen_str);
         for (auto it = moves.begin(); it != moves.end(); it++) {
             game_instance->get_state().make_move(*it);
@@ -215,6 +219,8 @@ void uci_interface::execute_command(std::string cmd_line)
         go_info info;
         info.type = GO_CLOCK;
         info.active = true;
+        info.ply = last_position_ply;
+
         for (auto it = splitted_cmd.begin(); it != splitted_cmd.end(); it++) {
             std::string str = *it;
             auto next_it = it+1;
@@ -265,9 +271,9 @@ void uci_interface::execute_command(std::string cmd_line)
 
         if (info.type == GO_CLOCK) {
             if (game_instance->get_state().get_turn() == WHITE) {
-                time_man->init(info.wtime, info.winc);
+                time_man->init(info.wtime, info.winc, ginfo.ply);
             } else {
-                time_man->init(info.btime, info.binc);
+                time_man->init(info.btime, info.binc, ginfo.ply);
             }
             search_man->prepare_clock_search(time_man);
         } else if (info.type == GO_NODES) {
@@ -297,13 +303,14 @@ void uci_interface::execute_command(std::string cmd_line)
         //When ponderhit happens, stop search and begin new search with clock
         ginfo.type = GO_CLOCK;
         if (game_instance->get_state().get_turn() == WHITE) {
-            time_man->init(ginfo.wtime, ginfo.winc);
+            time_man->init(ginfo.wtime, ginfo.winc, ginfo.ply);
         } else {
-            time_man->init(ginfo.btime, ginfo.binc);
+            time_man->init(ginfo.btime, ginfo.binc, ginfo.ply);
         }
         search_man->start_clock(time_man);
     } else if (cmd == "ucinewgame") {
         search_instance->new_game();
+        last_position_ply = 0;
     } else if (cmd == "quit") {
         exit_flag = true;
     } else if (cmd == "setoption") {
@@ -380,24 +387,24 @@ void uci_interface::iteration_end()
         uint64_t nps = search_man->get_nps();
 
         for (int i = last_info_iteration; i < latest_iteration; i++) {
-            search_result info = search_man->get_iteration_result(i);
+            auto info = search_man->get_iteration_result(i);
 
             for (int j = 0; j < multi_pv; j++) {
                 //int32_t eval = scale_eval(info.lines[j]->score);
 
-                int32_t eval = wdl_model::normalize_score(game_instance->get_state(), info.lines[j]->score);
+                int32_t eval = wdl_model::normalize_score(game_instance->get_state(), info->lines[j].score);
 
-                if (info.lines[j]->score == MIN_EVAL) {
+                if (info->lines[j].score == MIN_EVAL) {
                     continue;
                 }
 
                 std::stringstream ss;
                 ss << "info depth ";
-                ss << std::max(info.depth, depth_reached);
+                ss << std::max(info->depth, depth_reached);
 
                 ss << " seldepth ";
 
-                ss << info.seldepth;
+                ss << info->seldepth;
 
                 ss << " multipv " << j + 1;
 
@@ -417,14 +424,14 @@ void uci_interface::iteration_end()
                     ss << " wdl ";
 
                     float w, d, l;
-                    wdl_model::get_wdl(game_instance->get_state(), info.lines[j]->score, w, d, l);
+                    wdl_model::get_wdl(game_instance->get_state(), info->lines[j].score, w, d, l);
                     ss << (int)(w*1000) << " ";
                     ss << (int)(d*1000) << " ";
                     ss << (int)(l*1000);
                 }
 
                 ss << " nodes ";
-                ss << info.nodes;
+                ss << info->nodes;
 
                 ss << " nps ";
                 ss << nps;
@@ -432,17 +439,17 @@ void uci_interface::iteration_end()
                 ss << hashfull;
 
                 ss << " time ";
-                ss << info.time_ms;
+                ss << info->time_ms;
                 ss << " pv";
 
-                for (int k = 0; k < info.lines[j]->num_of_moves; k++) {
+                for (int k = 0; k < info->lines[j].num_of_moves; k++) {
                     ss << " ";
-                    ss << info.lines[j]->moves[k].to_uci();
+                    ss << info->lines[j].moves[k].to_uci();
                 }
 
                 send_command(ss.str());
 
-                depth_reached = std::max(info.depth, depth_reached);
+                depth_reached = std::max(info->depth, depth_reached);
             }
 
         }

@@ -1,6 +1,7 @@
 #include "misc.hpp"
 #include <fstream>
 #include <cmath>
+#include "pgn_parser.hpp"
 #include "../search_manager.hpp"
 
 int play_game_pair(searcher &s0, searcher &s1, const std::string &opening_fen, int base_time, int time_inc, bool s0_playing_black, match_stats &stats)
@@ -22,10 +23,13 @@ int play_game_pair(searcher &s0, searcher &s1, const std::string &opening_fen, i
         int s0_time_left = base_time;
         int s1_time_left = base_time;
 
+        int ply = 0;
+
         while (true) {
             chess_move mov;
             if ((s0_playing_black && game.get_turn() == BLACK) || (!s0_playing_black && game.get_turn() == WHITE)) {
-                tman->init(s0_time_left, time_inc);
+                tman->test_flag = s0.test_flag;
+                tman->init(s0_time_left, time_inc, ply);
                 sman->prepare_clock_search(tman);
 
                 s0.search(game.get_state(), sman);
@@ -36,7 +40,8 @@ int play_game_pair(searcher &s0, searcher &s1, const std::string &opening_fen, i
                 stats.s0_nps += sman->get_nps() / 1000;
                 stats.s0_moves += 1;
             } else {
-                tman->init(s1_time_left, time_inc);
+                tman->test_flag = s1.test_flag;
+                tman->init(s1_time_left, time_inc, ply);
                 sman->prepare_clock_search(tman);
 
                 s1.search(game.get_state(), sman);
@@ -63,69 +68,13 @@ int play_game_pair(searcher &s0, searcher &s1, const std::string &opening_fen, i
                 }
                 break;
             }
+
+            ply++;
         }
         s0_playing_black = !s0_playing_black;
     }
 
     return score;
-}
-
-
-bool save_selfplay_results(std::vector<selfplay_result> &results, std::string filename)
-{
-    std::cout << "Saving positions: " << filename << "... ";
-    std::ofstream file(filename);
-    if (file.is_open()) {
-        for (auto it = results.begin(); it != results.end(); it++) {
-            file << it->fen << ";" << it->bm.to_uci() << ";" << it->eval << ";" << it->wdl << std::endl;
-            //fen;bestmove;score;wdl
-        }
-    } else {
-        std::cout << "error: unable to open file!" << std::endl;
-        return false;
-    }
-    file.close();
-    std::cout << "done. " << results.size() << " positions saved!" << std::endl;
-    return true;
-}
-
-bool load_selfplay_results(std::vector<selfplay_result> &results, std::string filename)
-{
-    int total = 0;
-
-    std::cout << "Loading positions: " << filename << "... ";
-    std::ifstream file(filename);
-    if (file.is_open()) {
-        std::string line;
-        while (std::getline(file, line)) {
-
-            //fen;bestmove;score;wdl
-
-            std::string parts[8];
-            int num_of_parts = 0;
-            size_t p = line.find(';');
-            while (p != std::string::npos && num_of_parts < 7) {
-                parts[num_of_parts++] = line.substr(0, p);
-                line.erase(0, p + 1);
-                p = line.find(';');
-            }
-            parts[num_of_parts++] = line;
-
-            if (num_of_parts == 2) {
-                results.emplace_back(parts[0], chess_move::null_move().to_uci(), 0, atof(parts[1].c_str()));
-                total += 1;
-            } else if (num_of_parts == 4) {
-                results.emplace_back(parts[0], parts[1], atoi(parts[2].c_str()), atof(parts[3].c_str()));
-                total += 1;
-            }
-        }
-    } else {
-        std::cout << "error: unable to open file!" << std::endl;
-        return false;
-    }
-    file.close();
-    std::cout << "done. " << total << " positions loaded!" << std::endl;
-    return true;
 }
 
 
@@ -146,4 +95,60 @@ std::vector<std::string> load_opening_suite(std::string filename)
 
     return openings;
 }
+
+
+
+void iterate_pgn_positions(const std::string &pgn_text, std::function<void(const board_state &state, chess_move next_mov, game_win_type_t game_result, std::string *comment)> callback)
+{
+    std::vector<std::string> games = pgn_parser::parse_games(pgn_text);
+
+    board_state state;
+
+    for (const std::string &game : games) {
+
+        std::vector<pgn_tag> tags = pgn_parser::parse_tags(game);
+        std::vector<pgn_comment> comments;
+
+        std::string startpos = pgn_parser::get_tag_value(tags, "FEN");
+        std::string result = pgn_parser::get_tag_value(tags, "Result");
+
+        std::vector<chess_move> moves = pgn_parser::parse_moves(game, startpos, &comments);
+
+        if (startpos == "") {
+            state.set_initial_state();
+        } else {
+            state.load_fen(startpos);
+        }
+
+        game_win_type_t game_result = DRAW;
+        if (result == "1-0") {
+            game_result = WHITE_WIN;
+        } else if (result == "0-1") {
+            game_result = BLACK_WIN;
+        }
+
+        int comment_index = 0;
+
+        for (size_t i = 0; i < moves.size(); i++) {
+            chess_move mov = moves[i];
+
+            if (comment_index < comments.size() && comments[comment_index].pos == i) {
+
+                callback(state, mov, game_result, &comments[comment_index].comment);
+
+                comment_index++;
+            } else {
+                callback(state, mov, game_result, nullptr);
+            }
+
+            state.make_move(mov);
+        }
+    }
+}
+
+
+
+
+
+
 

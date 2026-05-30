@@ -58,24 +58,12 @@ void training_position::init(const board_state &state, float wdl, int32_t score)
     }
 }
 
-training_position::training_position(const selfplay_result &spr) {
-    board_state state;
-    state.load_fen(spr.fen);
-
-    init(state, spr.wdl, spr.eval);
-
-    encode_best_move(state, spr.bm);
-}
-
-training_position::training_position(const board_state &state, const selfplay_result &spr)
+training_position::training_position(const board_state &state, chess_move bm, int32_t eval, float wdl)
 {
-    init(state, spr.wdl, spr.eval);
+    init(state, wdl, eval);
 
-    encode_best_move(state, spr.bm);
+    encode_best_move(state, bm);
 }
-
-
-
 
 
 

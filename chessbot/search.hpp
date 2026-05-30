@@ -1,8 +1,5 @@
 #pragma once
 
-#include "game.hpp"
-
-#include "zobrist.hpp"
 #include "cache.hpp"
 
 #include <memory>
@@ -293,6 +290,7 @@ public:
     int32_t get_transpostion_table_usage_permill();
 
     bool test_flag;
+    bool forward_pruning;
 
     void set_threads(int num_of_threads);
     void set_transposition_table_size_MB(int size_MB);

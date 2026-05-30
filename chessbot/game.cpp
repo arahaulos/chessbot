@@ -95,7 +95,7 @@ game_win_type_t game_state::make_move(const chess_move &mov)
             return DRAW;
         }
 
-        if (state.check_repetition() >= 3 || state.half_move_clock >= 99) {
+        if (state.check_repetition() >= 3 || state.half_move_clock >= 100) {
             return DRAW;
         }
 

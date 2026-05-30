@@ -2,8 +2,10 @@
 #include <algorithm>
 #include <iostream>
 #include <cmath>
+#include "defs.hpp"
 #include "movepicker.hpp"
 #include "movegen.hpp"
+#include "see.hpp"
 #include "zobrist.hpp"
 #include "search_manager.hpp"
 
@@ -14,6 +16,7 @@ searcher::searcher()
 
     searching_flag = false;
     alphabeta_abort_flag = false;
+    forward_pruning = true;
 
     test_flag = true;
 
@@ -34,6 +37,7 @@ searcher::searcher(const searcher &other): transposition_table(other.transpositi
     test_flag = other.test_flag;
     current_cache_age = other.current_cache_age;
     num_of_pvs = other.num_of_pvs;
+    forward_pruning = other.forward_pruning;
 
     sp = other.sp;
 
@@ -391,7 +395,7 @@ int32_t searcher::alphabeta(board_state &state, int32_t alpha, int32_t beta, int
         }
     }
 
-    if (state.check_repetition() >= 2 || state.half_move_clock >= 100 || state.is_insufficient_material()) {
+    if (state.check_repetition() >= 2 || state.half_move_clock > 100 || state.is_insufficient_material()) {
         return 0;
     }
 
@@ -697,14 +701,13 @@ int32_t searcher::alphabeta(board_state &state, int32_t alpha, int32_t beta, int
         }
 
         //Forward pruning at low depth
-        if (best_score != MIN_EVAL && !is_mate_score(best_score) && ply > 2) {
+        if (forward_pruning && is_score_valid(best_score) && !is_mate_score(best_score) && ply > 2) {
             int lmr_depth = std::clamp(depth - reductions, (depth+1)/2, depth);
             int lmp_count = depth*depth + 6 + (is_pv ? 4 : 0);
             if ((mpicker.legal_moves >= lmp_count   &&  improving) ||
                 (mpicker.legal_moves >= lmp_count/2 && !improving)) {
                 mpicker.skip_quiets(); //Late move pruning. Currently does not prune killers
             }
-
 
             bool prune = false;
             if (!is_capture) {
@@ -779,6 +782,7 @@ int32_t searcher::alphabeta(board_state &state, int32_t alpha, int32_t beta, int
             if (move_type == KILLER_MOVE) {
                 reductions -= 1;
             }
+
             if (is_capture) {
                 reductions /= 2;
             }
@@ -849,7 +853,8 @@ int32_t searcher::alphabeta(board_state &state, int32_t alpha, int32_t beta, int
                 alpha = score;
                 node_type = PV_NODE;
 
-                pv.collect(line);
+                if (state.half_move_clock < 100)
+                    pv.collect(line);
             }
         }
     }
@@ -1014,6 +1019,7 @@ int32_t searcher::quisearch(board_state &state, int32_t alpha, int32_t beta, int
         transposition_table.prefetch(next_hash);
 
         sc.stats.nodes += 1;
+        sc.moves[ply] = mov;
 
         unmake_restore restore = state.make_move(mov, next_hash);
 

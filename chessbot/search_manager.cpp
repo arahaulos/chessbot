@@ -94,17 +94,20 @@ bool search_manager::on_end_of_iteration(int d, int seldepth, uint64_t n, pv_tab
 
     uint64_t timestamp = get_timestamp();
 
-    search_result r;
-    r.nodes = nodes;
-    r.time_ms = timestamp - start_time;
-    r.depth = depth;
-    r.seldepth = seldepth;
+    auto r = std::make_shared<search_result>();
+    r->nodes = nodes;
+    r->time_ms = timestamp - start_time;
+    r->depth = depth;
+    r->seldepth = seldepth;
+    r->lines.reserve(num_of_pvs);
     for (int i = 0; i < num_of_pvs; i++) {
-        r.lines.push_back(std::make_shared<pv_table>(pv[i]));
+        r->lines.emplace_back(pv[i]);
     }
-    results_lock.lock();
-    results.push_back(r);
-    results_lock.unlock();
+
+    {
+       std::lock_guard<std::mutex> guard(results_lock);
+       results.push_back(r);
+    }
 
     if (uci) {
         uci->iteration_end();
