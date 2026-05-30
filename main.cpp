@@ -9,7 +9,7 @@
 
 void global_init()
 {
-    //nnue_weights::get_shared_weights();
+    nnue_weights::get_shared_weights();
     std::srand(time(NULL));
 }
 
@@ -130,7 +130,7 @@ int main()
     print_info();
 
     //tune_search();
-    train();
+    //train();
     //test_search();
     //test_net();
     //datagen();
