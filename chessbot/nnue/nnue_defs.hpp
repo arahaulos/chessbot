@@ -14,7 +14,7 @@ constexpr size_t num_of_king_buckets = 16;
 constexpr size_t num_perspective_inputs = inputs_per_bucket*num_of_king_buckets;
 constexpr size_t factorizer_inputs = inputs_per_bucket;
 
-constexpr size_t num_perspective_neurons = 1024;
+constexpr size_t num_perspective_neurons = 768;
 constexpr size_t num_perspective_psqt = 8;
 constexpr size_t quantized_perspective_pad = 8;
 
